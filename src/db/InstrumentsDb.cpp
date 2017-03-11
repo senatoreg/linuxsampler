@@ -140,17 +140,17 @@ namespace LinuxSampler {
         if (s.find("~") == 0)
             s.replace(0, 1, getenv("HOME"));
         return s;
-       	#else // not __APPLE__
-	char *userhome = getenv("HOME");
-	if(userhome) {
-	    String s = userhome;
-	    s += "/.config/linuxsampler";
-	    s = s + "/instruments.db";
+        # else // not __APPLE__
+        char *userhome = getenv("HOME");
+        if(userhome) {
+            String s = userhome;
+            s += "/.config/linuxsampler";
+            s = s + "/instruments.db";
             return s;
-	} else {
+        } else {
              String s = CONFIG_DEFAULT_INSTRUMENTS_DB_LOCATION;
              return s;
-       	}
+        }
         # endif
         #endif
     }
