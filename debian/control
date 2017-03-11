@@ -33,7 +33,7 @@ Description: realtime audio sampler
 Package: liblinuxsampler-dev
 Section: libdevel
 Architecture: any
-Depends: liblinuxsampler (= ${Source-Version})
+Depends: liblinuxsampler (= ${source:Version})
 Description: realtime audio sampler (development files)
  LinuxSampler is a free software audio sampler with professional grade features.
  It offers disk streaming capability, real-time instrument scripts, and
