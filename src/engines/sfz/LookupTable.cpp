@@ -279,9 +279,13 @@ namespace sfz {
         if (nbDimensions) {
             int c = len[nbDimensions - 1];
             for (dim = nbDimensions - 2 ; dim >= 0 ; dim--) {
-                const DimDef& dimDef = dimDefs[dims[dim]];
-                int max = dimDef.max == -1 ? 127 : dimDef.max;
-                for (int i = dimDef.min ; i <= max ; i++) mapArr[dim][i] *= c;
+                if (dims.size() && dim < dims.size()) {
+                    const DimDef& dimDef = dimDefs[dims[dim]];
+                    int max = dimDef.max == -1 ? 127 : dimDef.max;
+                    for (int i = dimDef.min ; i <= max ; i++) mapArr[dim][i] *= c;
+                } else {
+                       for (int i = 0 ; i <= 127 ; i++) mapArr[dim][i] *= c;
+                }
                 c *= len[dim];
             }
         }
