@@ -5,7 +5,7 @@
  *   Copyright (C) 2003,2004 by Benno Senoner and Christian Schoenebeck    *
  *   Copyright (C) 2005-2008 Christian Schoenebeck                         *
  *   Copyright (C) 2009-2012 Christian Schoenebeck and Grigor Iliev        *
- *   Copyright (C) 2013-2016 Christian Schoenebeck and Andreas Persson     *
+ *   Copyright (C) 2013-2017 Christian Schoenebeck and Andreas Persson     *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -129,7 +129,7 @@ namespace LinuxSampler {
         AboutToTrigger();
 
         // calculate volume
-        const double velocityAttenuation = GetVelocityAttenuation(itNoteOnEvent->Param.Note.Velocity);
+        const double velocityAttenuation = GetVelocityAttenuation(MIDIVelocity());
         float volume = CalculateVolume(velocityAttenuation) * pKeyInfo->Volume;
         if (volume <= 0) return -1;
 
@@ -139,7 +139,7 @@ namespace LinuxSampler {
         SYNTHESIS_MODE_SET_BITDEPTH24(SynthesisMode, SmplInfo.BitDepth == 24);
 
         // get starting crossfade volume level
-        float crossfadeVolume = CalculateCrossfadeVolume(itNoteOnEvent->Param.Note.Velocity);
+        float crossfadeVolume = CalculateCrossfadeVolume(MIDIVelocity());
 
         VolumeLeft  = volume * pKeyInfo->PanLeft;
         VolumeRight = volume * pKeyInfo->PanRight;
@@ -147,11 +147,13 @@ namespace LinuxSampler {
         // this rate is used for rather mellow volume fades
         const float subfragmentRate = GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE;
         // this rate is used for very fast volume fades
-        const float quickRampRate = RTMath::Min(subfragmentRate, GetEngine()->SampleRate * 0.001f /* 1ms */);
+        const float quickRampRate = RTMath::Min(subfragmentRate, GetEngine()->SampleRate * 0.001f /* approx. 13ms */);
         CrossfadeSmoother.trigger(crossfadeVolume, subfragmentRate);
 
         VolumeSmoother.trigger(pEngineChannel->MidiVolume, subfragmentRate);
-        NoteVolumeSmoother.trigger(pNote ? pNote->Override.Volume : 1.f, quickRampRate);
+        NoteVolume.setCurveOnly(pNote ? pNote->Override.VolumeCurve : DEFAULT_FADE_CURVE);
+        NoteVolume.setCurrentValue(pNote ? pNote->Override.Volume : 1.f);
+        NoteVolume.setDefaultDuration(pNote ? pNote->Override.VolumeTime : DEFAULT_NOTE_VOLUME_TIME_S);
 
         // Check if the sample needs disk streaming or is too short for that
         long cachedsamples = GetSampleCacheSize() / SmplInfo.FrameSize;
@@ -191,16 +193,18 @@ namespace LinuxSampler {
         }
 
         Pitch = CalculatePitchInfo(PitchBend);
-        NotePitch = (pNote) ? pNote->Override.Pitch : 1.0f;
+        NotePitch.setCurveOnly(pNote ? pNote->Override.PitchCurve : DEFAULT_FADE_CURVE);
+        NotePitch.setCurrentValue(pNote ? pNote->Override.Pitch : 1.0f);
+        NotePitch.setDefaultDuration(pNote ? pNote->Override.PitchTime : DEFAULT_NOTE_PITCH_TIME_S);
         NoteCutoff = (pNote) ? pNote->Override.Cutoff : 1.0f;
         NoteResonance = (pNote) ? pNote->Override.Resonance : 1.0f;
 
         // the length of the decay and release curves are dependent on the velocity
-        const double velrelease = 1 / GetVelocityRelease(itNoteOnEvent->Param.Note.Velocity);
+        const double velrelease = 1 / GetVelocityRelease(MIDIVelocity());
 
         if (pSignalUnitRack == NULL) { // setup EG 1 (VCA EG)
             // get current value of EG1 controller
-            double eg1controllervalue = GetEG1ControllerValue(itNoteOnEvent->Param.Note.Velocity);
+            double eg1controllervalue = GetEG1ControllerValue(MIDIVelocity());
 
             // calculate influence of EG1 controller on EG1's parameters
             EGInfo egInfo = CalculateEG1ControllerInfluence(eg1controllervalue);
@@ -211,7 +215,7 @@ namespace LinuxSampler {
                 egInfo.Release *= pNote->Override.Release;
             }
 
-            TriggerEG1(egInfo, velrelease, velocityAttenuation, GetEngine()->SampleRate, itNoteOnEvent->Param.Note.Velocity);
+            TriggerEG1(egInfo, velrelease, velocityAttenuation, GetEngine()->SampleRate, MIDIVelocity());
         } else {
             pSignalUnitRack->Trigger();
         }
@@ -255,12 +259,12 @@ namespace LinuxSampler {
             // setup EG 2 (VCF Cutoff EG)
             {
                 // get current value of EG2 controller
-                double eg2controllervalue = GetEG2ControllerValue(itNoteOnEvent->Param.Note.Velocity);
+                double eg2controllervalue = GetEG2ControllerValue(MIDIVelocity());
 
                 // calculate influence of EG2 controller on EG2's parameters
                 EGInfo egInfo = CalculateEG2ControllerInfluence(eg2controllervalue);
 
-                TriggerEG2(egInfo, velrelease, velocityAttenuation, GetEngine()->SampleRate, itNoteOnEvent->Param.Note.Velocity);
+                TriggerEG2(egInfo, velrelease, velocityAttenuation, GetEngine()->SampleRate, MIDIVelocity());
             }
 
 
@@ -319,7 +323,7 @@ namespace LinuxSampler {
             VCFResonanceCtrl.value = pEngineChannel->ControllerTable[VCFResonanceCtrl.controller];
 
             // calculate cutoff frequency
-            CutoffBase = CalculateCutoffBase(itNoteOnEvent->Param.Note.Velocity);
+            CutoffBase = CalculateCutoffBase(MIDIVelocity());
 
             VCFCutoffCtrl.fvalue = CalculateFinalCutoff(CutoffBase);
 
@@ -344,8 +348,19 @@ namespace LinuxSampler {
     }
     
     void AbstractVoice::SetSampleStartOffset() {
-        finalSynthesisParameters.dPos = RgnInfo.SampleStartOffset; // offset where we should start playback of sample (0 - 2000 sample points)
-        Pos = RgnInfo.SampleStartOffset;
+        double pos = RgnInfo.SampleStartOffset; // offset where we should start playback of sample
+
+        // if another sample playback start position was requested by instrument
+        // script (built-in script function play_note())
+        if (pNote && pNote->Override.SampleOffset >= 0) {
+            double overridePos =
+                double(SmplInfo.SampleRate) * double(pNote->Override.SampleOffset) / 1000000.0;
+            if (overridePos < SmplInfo.TotalFrameCount)
+                pos = overridePos;
+        }
+
+        finalSynthesisParameters.dPos = pos;
+        Pos = pos;
     }
 
     /**
@@ -456,9 +471,9 @@ namespace LinuxSampler {
             PanLeftSmoother.update(AbstractEngine::PanCurve[128 - pan] * NotePanLeft);
             PanRightSmoother.update(AbstractEngine::PanCurve[pan]      * NotePanRight);
 
-            finalSynthesisParameters.fFinalPitch = Pitch.PitchBase * Pitch.PitchBend * NotePitch;
+            finalSynthesisParameters.fFinalPitch = Pitch.PitchBase * Pitch.PitchBend * NotePitch.render();
 
-            float fFinalVolume = VolumeSmoother.render() * CrossfadeSmoother.render() * NoteVolumeSmoother.render();
+            float fFinalVolume = VolumeSmoother.render() * CrossfadeSmoother.render() * NoteVolume.render();
 #ifdef CONFIG_PROCESS_MUTED_CHANNELS
             if (pChannel->GetMute()) fFinalVolume = 0;
 #endif
@@ -729,16 +744,34 @@ namespace LinuxSampler {
             {
                 EnterReleaseStage();
             }
+            // process kill-note events (caused by built-in instrument script function fade_out())
+            if (itEvent->Type == Event::type_kill_note && pNote &&
+                pEngineChannel->pEngine->NoteByID( itEvent->Param.Note.ID ) == pNote)
+            {
+                Kill(itEvent);
+            }
             // process synthesis parameter events (caused by built-in realt-time instrument script functions)
             if (itEvent->Type == Event::type_note_synth_param && pNote &&
                 pEngineChannel->pEngine->NoteByID( itEvent->Param.NoteSynthParam.NoteID ) == pNote)
             {
                 switch (itEvent->Param.NoteSynthParam.Type) {
                     case Event::synth_param_volume:
-                        NoteVolumeSmoother.update(itEvent->Param.NoteSynthParam.AbsValue);
+                        NoteVolume.fadeTo(itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+                        break;
+                    case Event::synth_param_volume_time:
+                        NoteVolume.setDefaultDuration(itEvent->Param.NoteSynthParam.AbsValue);
+                        break;
+                    case Event::synth_param_volume_curve:
+                        NoteVolume.setCurve((fade_curve_t)itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
                         break;
                     case Event::synth_param_pitch:
-                        NotePitch = itEvent->Param.NoteSynthParam.AbsValue;
+                        NotePitch.fadeTo(itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+                        break;
+                    case Event::synth_param_pitch_time:
+                        NotePitch.setDefaultDuration(itEvent->Param.NoteSynthParam.AbsValue);
+                        break;
+                    case Event::synth_param_pitch_curve:
+                        NotePitch.setCurve((fade_curve_t)itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
                         break;
                     case Event::synth_param_pan:
                         NotePanLeft  = AbstractEngine::PanCurveValueNorm(itEvent->Param.NoteSynthParam.AbsValue, 0 /*left*/);

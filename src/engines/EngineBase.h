@@ -676,7 +676,7 @@ namespace LinuxSampler {
              * @param pNoteOnEvent - event which caused this
              * @returns new note's unique ID (or zero on error)
              */
-            note_id_t LaunchNewNote(LinuxSampler::EngineChannel* pEngineChannel, Event* pNoteOnEvent) OVERRIDE {
+            note_id_t LaunchNewNote(LinuxSampler::EngineChannel* pEngineChannel, Pool<Event>::Iterator& itNoteOnEvent) OVERRIDE {
                 EngineChannelBase<V, R, I>* pChannel = static_cast<EngineChannelBase<V, R, I>*>(pEngineChannel);
                 Pool< Note<V> >* pNotePool = GetNotePool();
 
@@ -691,7 +691,7 @@ namespace LinuxSampler {
                 const note_id_t newNoteID = pNotePool->getID(itNewNote);
 
                 // remember the engine's time when this note was triggered exactly
-                itNewNote->triggerSchedTime = pNoteOnEvent->SchedTime();
+                itNewNote->triggerSchedTime = itNoteOnEvent->SchedTime();
 
                 // usually the new note (and its subsequent voices) will be
                 // allocated on the key provided by the event's note number,
@@ -699,11 +699,11 @@ namespace LinuxSampler {
                 // note, but rather a child note, then this new note will be
                 // allocated on the parent note's key instead in order to
                 // release the child note simultaniously with its parent note
-                itNewNote->hostKey = pNoteOnEvent->Param.Note.Key;
+                itNewNote->hostKey = itNoteOnEvent->Param.Note.Key;
 
                 // in case this new note was requested to be a child note,
                 // then retrieve its parent note and link them with each other
-                const note_id_t parentNoteID = pNoteOnEvent->Param.Note.ParentNoteID;
+                const note_id_t parentNoteID = itNoteOnEvent->Param.Note.ParentNoteID;
                 if (parentNoteID) {
                     NoteIterator itParentNote = pNotePool->fromID(parentNoteID);                        
                     if (itParentNote) {
@@ -731,15 +731,18 @@ namespace LinuxSampler {
                 dmsg(2,("Launched new note on host key %d\n", itNewNote->hostKey));
 
                 // copy event which caused this note
-                itNewNote->cause = *pNoteOnEvent;
-                itNewNote->eventID = pEventPool->getID(pNoteOnEvent);
+                itNewNote->cause = *itNoteOnEvent;
+                itNewNote->eventID = pEventPool->getID(itNoteOnEvent);
+                if (!itNewNote->eventID) {
+                    dmsg(0,("Engine: No valid event ID resolved for note. This is a bug!!!\n"));
+                }
 
                 // move new note to its host key
                 MidiKey* pKey = &pChannel->pMIDIKeyInfo[itNewNote->hostKey];
                 itNewNote.moveToEndOf(pKey->pActiveNotes);
 
                 // assign unique note ID of this new note to the original note on event
-                pNoteOnEvent->Param.Note.ID = newNoteID;
+                itNoteOnEvent->Param.Note.ID = newNoteID;
 
                 return newNoteID; // success
             }
@@ -809,6 +812,7 @@ namespace LinuxSampler {
                             case Event::type_release_note:
                             case Event::type_play_note:
                             case Event::type_stop_note:
+                            case Event::type_kill_note:
                             case Event::type_note_synth_param:
                                 break; // noop
                         }
@@ -880,6 +884,10 @@ namespace LinuxSampler {
                             case Event::type_stop_note:
                                 dmsg(5,("Engine: Stop Note received\n"));
                                 ProcessNoteOff((EngineChannel*)itEvent->pEngineChannel, itEvent);
+                                break;
+                            case Event::type_kill_note:
+                                dmsg(5,("Engine: Kill Note received\n"));
+                                ProcessKillNote((EngineChannel*)itEvent->pEngineChannel, itEvent);
                                 break;
                             case Event::type_control_change:
                                 dmsg(5,("Engine: MIDI CC received\n"));
@@ -976,6 +984,10 @@ namespace LinuxSampler {
                     // script event object
                     RTList<ScriptEvent>::Iterator itScriptEvent =
                         pChannel->pScript->pEvents->allocAppend();
+                    // if event handler uses polyphonic variables, reset them
+                    // to zero values before starting to execute the handler
+                    if (pEventHandler->isPolyphonic())
+                        itScriptEvent->execCtx->resetPolyphonicData();
                     ProcessScriptEvent(
                         pChannel, itEvent, pEventHandler, itScriptEvent
                     );
@@ -1008,6 +1020,7 @@ namespace LinuxSampler {
 
                 // initialize/reset other members
                 itScriptEvent->cause = *itEvent;
+                itScriptEvent->scheduleTime = itEvent->SchedTime();
                 itScriptEvent->currentHandler = 0;
                 itScriptEvent->executionSlices = 0;
                 itScriptEvent->ignoreAllWaitCalls = false;
@@ -1291,9 +1304,20 @@ namespace LinuxSampler {
                             itScriptEvent->ignoreAllWaitCalls = false;
                             itScriptEvent->handlerType = VM_EVENT_HANDLER_INIT;
 
-                            /*VMExecStatus_t res = */ pScriptVM->exec(
-                                pEngineChannel->pScript->parserContext, &*itScriptEvent
-                            );
+                            VMExecStatus_t res;
+                            size_t instructionsCount = 0;
+                            const size_t maxInstructions = 200000; // aiming approx. 1 second max. (based on very roughly 5us / instruction)
+                            bool bWarningShown = false;
+                            do {
+                                res = pScriptVM->exec(
+                                    pEngineChannel->pScript->parserContext, &*itScriptEvent
+                                );
+                                instructionsCount += itScriptEvent->execCtx->instructionsPerformed();
+                                if (instructionsCount > maxInstructions && !bWarningShown) {
+                                    bWarningShown = true;
+                                    dmsg(0,("[ScriptVM] WARNING: \"init\" event handler of instrument script executing for long time!\n"));
+                                }
+                            } while (res & VM_EXEC_SUSPENDED && !(res & VM_EXEC_ERROR));
 
                             pEngineChannel->pScript->pEvents->free(itScriptEvent);
                         }
@@ -1354,7 +1378,7 @@ namespace LinuxSampler {
                         // usually there should already be a new Note object
                         NoteIterator itNote = GetNotePool()->fromID(itVoiceStealEvent->Param.Note.ID);
                         if (!itNote) { // should not happen, but just to be sure ...
-                            const note_id_t noteID = LaunchNewNote(pEngineChannel, &*itVoiceStealEvent);
+                            const note_id_t noteID = LaunchNewNote(pEngineChannel, itVoiceStealEvent);
                             if (!noteID) {
                                 dmsg(1,("Engine: Voice stealing failed; No Note object and Note pool empty!\n"));
                                 continue;
@@ -1831,7 +1855,7 @@ namespace LinuxSampler {
                                         itPseudoNoteOnEvent->Param.Note.Key      = i;
                                         itPseudoNoteOnEvent->Param.Note.Velocity = pOtherKey->Velocity;
                                         // assign a new note to this note-on event
-                                        if (LaunchNewNote(pChannel, &*itPseudoNoteOnEvent)) {
+                                        if (LaunchNewNote(pChannel, itPseudoNoteOnEvent)) {
                                             // allocate and trigger new voice(s) for the other key
                                             TriggerNewVoices(pChannel, itPseudoNoteOnEvent, false);
                                         }
@@ -1918,7 +1942,7 @@ namespace LinuxSampler {
                 // spawn release triggered voice(s) if needed
                 if (pKey->ReleaseTrigger && pChannel->pInstrument) {
                     // assign a new note to this release event
-                    if (LaunchNewNote(pChannel, &*itEvent)) {
+                    if (LaunchNewNote(pChannel, itEvent)) {
                         // allocate and trigger new release voice(s)
                         TriggerReleaseVoices(pChannel, itEvent);
                     }
@@ -1927,9 +1951,27 @@ namespace LinuxSampler {
             }
 
             /**
+             * Called on "kill note" events, which currently only happens on
+             * built-in real-time instrument script function fade_out(). This
+             * method only fulfills one task: moving the even to the Note's own
+             * event list so that its voices can process the kill event sample
+             * accurately.
+             */
+            void ProcessKillNote(EngineChannel* pEngineChannel, RTList<Event>::Iterator& itEvent) {
+                EngineChannelBase<V, R, I>* pChannel = static_cast<EngineChannelBase<V, R, I>*>(pEngineChannel);
+
+                NoteBase* pNote = pChannel->pEngine->NoteByID( itEvent->Param.Note.ID );
+                if (!pNote || pNote->hostKey < 0 || pNote->hostKey >= 128) return;
+
+                // move note kill event to its MIDI key
+                MidiKey* pKey = &pChannel->pMIDIKeyInfo[pNote->hostKey];
+                itEvent.moveToEndOf(pKey->pEvents);
+            }
+
+            /**
              * Called on note synthesis parameter change events. These are
              * internal events caused by calling built-in real-time instrument
-             * script functions like change_vol(), change_pitch(), etc.
+             * script functions like change_vol(), change_tune(), etc.
              *
              * This method performs two tasks:
              *
@@ -1960,12 +2002,26 @@ namespace LinuxSampler {
                             pNote->Override.Volume = itEvent->Param.NoteSynthParam.Delta;
                         itEvent->Param.NoteSynthParam.AbsValue = pNote->Override.Volume;
                         break;
+                    case Event::synth_param_volume_time:
+                        pNote->Override.VolumeTime = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        break;
+                    case Event::synth_param_volume_curve:
+                        itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->Override.VolumeCurve = (fade_curve_t) itEvent->Param.NoteSynthParam.AbsValue;
+                        break;
                     case Event::synth_param_pitch:
                         if (relative)
                             pNote->Override.Pitch *= itEvent->Param.NoteSynthParam.Delta;
                         else
                             pNote->Override.Pitch = itEvent->Param.NoteSynthParam.Delta;
                         itEvent->Param.NoteSynthParam.AbsValue = pNote->Override.Pitch;
+                        break;
+                    case Event::synth_param_pitch_time:
+                        pNote->Override.PitchTime = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        break;
+                    case Event::synth_param_pitch_curve:
+                        itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->Override.PitchCurve = (fade_curve_t) itEvent->Param.NoteSynthParam.AbsValue;
                         break;
                     case Event::synth_param_pan:
                         if (relative) {

@@ -117,6 +117,18 @@ namespace LinuxSampler {
                 else
                     return 1;
             }
+
+            case STMT_SYNC: {
+                #if DEBUG_SCRIPTVM_CORE
+                _printIndents(depth);
+                printf("-> STMT_SYNC\n");
+                #endif
+                SyncBlock* syncStmt = (SyncBlock*) statement;
+                if (syncStmt->statements())
+                    return _requiredMaxStackSizeFor( syncStmt->statements() ) + 1;
+                else
+                    return 1;
+            }
         }
 
         return 1; // actually just to avoid compiler warning
@@ -147,6 +159,9 @@ namespace LinuxSampler {
         m_fnShRight = new CoreVMFunction_sh_right;
         m_fnMin = new CoreVMFunction_min;
         m_fnMax = new CoreVMFunction_max;
+        m_fnArrayEqual = new CoreVMFunction_array_equal;
+        m_fnSearch = new CoreVMFunction_search;
+        m_fnSort = new CoreVMFunction_sort;
     }
 
     ScriptVM::~ScriptVM() {
@@ -163,6 +178,9 @@ namespace LinuxSampler {
         delete m_fnShRight;
         delete m_fnMin;
         delete m_fnMax;
+        delete m_fnArrayEqual;
+        delete m_fnSearch;
+        delete m_fnSort;
         delete m_varRealTimer;
         delete m_varPerfTimer;
     }
@@ -269,6 +287,9 @@ namespace LinuxSampler {
         else if (name == "sh_right") return m_fnShRight;
         else if (name == "min") return m_fnMin;
         else if (name == "max") return m_fnMax;
+        else if (name == "array_equal") return m_fnArrayEqual;
+        else if (name == "search") return m_fnSearch;
+        else if (name == "sort") return m_fnSort;
         return NULL;
     }
 
@@ -344,8 +365,10 @@ namespace LinuxSampler {
         m_parserContext->execContext = ctx;
 
         ctx->status = VM_EXEC_RUNNING;
+        ctx->instructionsCount = 0;
         StmtFlags_t flags = STMT_SUCCESS;
         int instructionsCounter = 0;
+        int synced = m_autoSuspend ? 0 : 1;
 
         int& frameIdx = ctx->stackFrame;
         if (frameIdx < 0) { // start condition ...
@@ -422,7 +445,7 @@ namespace LinuxSampler {
                         ctx->pushStack(
                             whileStmt->statements()
                         );
-                        if (flags == STMT_SUCCESS && m_autoSuspend &&
+                        if (flags == STMT_SUCCESS && !synced &&
                             instructionsCounter > SCRIPTVM_MAX_INSTR_PER_CYCLE_SOFT)
                         {
                             flags = StmtFlags_t(STMT_SUSPEND_SIGNALLED);
@@ -431,9 +454,27 @@ namespace LinuxSampler {
                     } else ctx->popStack();
                     break;
                 }
+
+                case STMT_SYNC: {
+                    #if DEBUG_SCRIPTVM_CORE
+                    _printIndents(frameIdx);
+                    printf("-> STMT_SYNC\n");
+                    #endif
+                    SyncBlock* syncStmt = (SyncBlock*) frame.statement;
+                    if (!frame.subindex++ && syncStmt->statements()) {
+                        ++synced;
+                        ctx->pushStack(
+                            syncStmt->statements()
+                        );
+                    } else {
+                        ctx->popStack();
+                        --synced;
+                    }
+                    break;
+                }
             }
 
-            if (flags == STMT_SUCCESS && m_autoSuspend &&
+            if (flags == STMT_SUCCESS && !synced &&
                 instructionsCounter > SCRIPTVM_MAX_INSTR_PER_CYCLE_HARD)
             {
                 flags = StmtFlags_t(STMT_SUSPEND_SIGNALLED);
@@ -451,6 +492,8 @@ namespace LinuxSampler {
                 ctx->status = VM_EXEC_ERROR;
             ctx->reset();
         }
+
+        ctx->instructionsCount = instructionsCounter;
 
         m_eventHandler = NULL;
         m_parserContext->execContext = NULL;

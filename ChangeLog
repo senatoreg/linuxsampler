@@ -8,7 +8,7 @@ Version SVN trunk (?)
     - Implemented opcode set_ccN (initial patch by Giovanni Senatore).
     - Fixed unintended volume fade-in of voices under certain conditions.
 
-  * Gigasampler format engine:
+  * Gigasampler/GigaStudio format engine:
     - Fixed clicks and pumping noise with Lowpass Turbo filter on very low
       cutoff settings.
 
@@ -43,6 +43,7 @@ Version SVN trunk (?)
     - windows, 32-bit: fixed potential crashes by making sure the stack in
       sub threads is 16-byte aligned
     - fixed numerous compiler warnings
+    - Fixed invalid (note-on) event ID being assigned to new Note objects.
 
   * packaging changes:
     - removed unnecessary dependency to libuuid
@@ -147,6 +148,61 @@ Version SVN trunk (?)
     - Implemented built-in script function "change_amp_lfo_freq()".
     - Implemented built-in script function "change_pitch_lfo_depth()".
     - Implemented built-in script function "change_pitch_lfo_freq()".
+    - Implemented built-in script function "change_vol_time()".
+    - Implemented built-in script function "change_tune_time()".
+    - Implemented built-in script function "fade_in()".
+    - Implemented built-in script function "fade_out()".
+    - Fixed acceptance of wrong data type of parameters passed to built-in
+      script functions "change_vol()", "change_tune()", "change_pan()",
+      "change_cutoff()", "change_reso()", "change_attack()", "change_decay()",
+      "change_release()", "change_amp_lfo_depth()", "change_amp_lfo_freq()",
+      "change_pitch_lfo_depth()" and "change_pitch_lfo_freq()".
+    - Added built-in script function "get_event_par()" and implemented some
+      of its possible parameter selections.
+    - Added built-in script function "set_event_par()" and implemented some
+      of its possible parameter selections.
+    - Fixed a bunch of scheduler time related bugs.
+    - Fixed polyphonic variables not being reset to zero after usage.
+    - Built-in "ignore_event()" function: argument is now optional, like with
+      built-in function "ignore_controller()".
+    - Implemented built-in script function "change_velo()".
+    - Implemented built-in script function "change_note()".
+    - Adjusted behavior of "change_vol()" and "change_tune()" to a more
+      intuitive behavior if used in combination with "change_vol_time()" or
+      "change_tune_time()" respectively: now tuning/volume changes are only
+      assigned (without delay) immediately to a new note if the respective
+      timing function has not been called before, otherwise the volume/tuning
+      changes are automatically faded (before, only the event's time stamp was
+      relevant).
+     - Implemented built-in script function "array_equal()".
+     - Implemented built-in script function "search()".
+     - Implemented built-in script function "sort()".
+     - NKSP Fix: Never suspend "init" event handlers.
+     - Implemented built-in script function "same_region()" (currently only
+       available for gig format engine).
+     - Added built-in script constant "$NKSP_LINEAR".
+     - Added built-in script constant "$NKSP_EASE_IN_EASE_OUT".
+     - Implemented built-in script function "change_vol_curve()".
+     - Implemented built-in script function "change_tune_curve()".
+     - built-in "play_note()" function now supports a sample playback start
+       offset with argument 3, where special value -1 means to use the regular
+       sample offset as defined by the instrument file.
+     - Built-in array variable %KEY_DOWN[] is now a read-only variable.
+     - Built-in variable $EVENT_NOTE is now a read-only variable.
+     - Built-in variable $EVENT_VELOCITY is now a read-only variable.
+     - built-in "play_note()" function now accepts -2 for its fourth argument
+       (note duration) which means the life time of the note shall be sticked
+       to the requested note number of argument 1.
+     - Fix: built-in "play_note()" function now returns 0 as result value if
+       -1 was passed for its fourth argument (note duration) and the respective
+       parent note is already gone.
+    - Implemented built-in script function "change_play_pos()".
+    - NKSP language: Added support for user declared const array variables.
+    - NKSP language: Raise parser warning if array variable is accessed with
+      an index that exceeds the array's size.
+    - NKSP language fix: Unknown characters were not handled correctly.
+    - NKSP language: Added support for "synchronized .. end synchronized"
+      code blocks.
 
   * Instruments DB:
     - Fixed memory access bug of general DB access code which lead to
@@ -631,7 +687,7 @@ Version 2.0.0 (15 July 2015)
       $GIG_DIM_EFFECT3DEPTH, $GIG_DIM_EFFECT4DEPTH, $GIG_DIM_EFFECT5DEPTH.
     - Giga format scripts: Implemented built-in script function
       "gig_set_dim_zone(event_id, dimension, zone)".
-    - Implemented built-in script int array variable $KEY_DOWN.
+    - Implemented built-in script int array variable %KEY_DOWN.
     - Implemented built-in script function "abs()".
     - Implemented built-in script function "random()".
     - Implemented built-in script function "num_elements()".
