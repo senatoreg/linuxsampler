@@ -12,6 +12,10 @@
 
 #include "../../common/Pool.h"
 #include "Event.h"
+#include "Fade.h"
+
+#define DEFAULT_NOTE_VOLUME_TIME_S  0.013f /* 13ms */
+#define DEFAULT_NOTE_PITCH_TIME_S   0.013f /* 13ms */
 
 namespace LinuxSampler {
 
@@ -32,7 +36,9 @@ namespace LinuxSampler {
         /// Optional synthesis parameters that might be overridden (by calling real-time instrument script functions like change_vol(), change_pitch(), etc.).
         struct  _Override {
             float Volume;       ///< as linear amplification ratio (1.0 being neutral)
+            float VolumeTime;   ///< Transition duration (in seconds) for changes to @c Volume.
             float Pitch;        ///< as linear frequency ratio (1.0 being neutral)
+            float PitchTime;    ///< Transition duration (in seconds) for changes to @c Pitch.
             float Pan;          ///< between -1.0 (most left) and +1.0 (most right) and 0.0 being neutral.
             int64_t PanSources; ///< Might be used for calculating an average pan value in differential way: amount of times the Pan value had been changed and shall be calculated relatively upon.
             float Cutoff;       ///< between 0.0 and 1.0
@@ -44,6 +50,9 @@ namespace LinuxSampler {
             float AmpLFOFreq;   ///< between 0.0 and 1.0
             float PitchLFODepth; ///< between 0.0 and 1.0
             float PitchLFOFreq; ///< between 0.0 and 1.0
+            fade_curve_t VolumeCurve;
+            fade_curve_t PitchCurve;
+            int SampleOffset; ///< Where the sample shall start playback in microseconds (otherwise this is -1 for being ignored).
         } Override;
         /// Sampler format specific informations and variables.
         union _Format {
@@ -53,10 +62,13 @@ namespace LinuxSampler {
                 uint8_t DimBits; ///< Used only in conjunction with DimMask: Dimension bits that shall be selected.
             } Gig;
         } Format;
+        int userPar[4]; ///< Used only for real-time instrument script functions set_event_par() and get_event_par() to store script author's user specific data ($EVENT_PAR_0 to $EVENT_PAR_3).
     protected:
         NoteBase() : hostKey(0), parentNoteID(0), pChildNotes(NULL) {
             Override.Volume     = 1.f;
+            Override.VolumeTime = DEFAULT_NOTE_VOLUME_TIME_S;
             Override.Pitch      = 1.f;
+            Override.PitchTime  = DEFAULT_NOTE_PITCH_TIME_S;
             Override.Pan        = 0.f;
             Override.PanSources = 0;
             Override.Cutoff     = 1.f;
@@ -68,20 +80,32 @@ namespace LinuxSampler {
             Override.AmpLFOFreq    = 1.f;
             Override.PitchLFODepth = 1.f;
             Override.PitchLFOFreq  = 1.f;
+            Override.VolumeCurve = DEFAULT_FADE_CURVE;
+            Override.PitchCurve  = DEFAULT_FADE_CURVE;
+            Override.SampleOffset = -1;
 
             Format = _Format();
+
+            userPar[0] = 0;
+            userPar[1] = 0;
+            userPar[2] = 0;
+            userPar[3] = 0;
         }
     };
 
     /**
      * Contains the voices caused by one specific note, as well as basic
-     * informations about the note itself. You can see a Note object as one
+     * information about the note itself. You can see a Note object as one
      * specific event in time where one or more voices were spawned at the same
      * time and all those voices due to the same cause.
      *
      * For example when you press down and hold the sustain pedal, and then
      * trigger the same note on the keyboard multiple times, for each key
-     * strokes a separate Note instance is created.
+     * strokes a separate Note instance is created. Assuming you have a layered
+     * sound with 4 layers, then for each note that is triggered 4 voices will
+     * be spawned and assigned to the same Note object. By grouping those voices
+     * to one specific Note object, it allows to control the synthesis paramters
+     * of those layered voices simultaniously.
      *
      * If your instrument contains a real-time instrument script, then that
      * script might also trigger additional voices programmatically (by
@@ -120,7 +144,9 @@ namespace LinuxSampler {
             cause = Event();
             eventID = 0;
             Override.Volume     = 1.f;
+            Override.VolumeTime = DEFAULT_NOTE_VOLUME_TIME_S;
             Override.Pitch      = 1.f;
+            Override.PitchTime  = DEFAULT_NOTE_PITCH_TIME_S;
             Override.Pan        = 0.f;
             Override.PanSources = 0;
             Override.Cutoff     = 1.f;
@@ -132,7 +158,14 @@ namespace LinuxSampler {
             Override.AmpLFOFreq    = 1.f;
             Override.PitchLFODepth = 1.f;
             Override.PitchLFOFreq  = 1.f;
+            Override.VolumeCurve = DEFAULT_FADE_CURVE;
+            Override.PitchCurve  = DEFAULT_FADE_CURVE;
+            Override.SampleOffset = -1;
             Format = _Format();
+            userPar[0] = 0;
+            userPar[1] = 0;
+            userPar[2] = 0;
+            userPar[3] = 0;
             if (pActiveVoices) {
                 typename RTList<V>::Iterator itVoice = pActiveVoices->first();
                 typename RTList<V>::Iterator itVoicesEnd = pActiveVoices->end();

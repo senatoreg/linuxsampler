@@ -13,6 +13,7 @@
 #include "../../common/global_private.h"
 #include "AbstractInstrumentManager.h"
 #include "MidiKeyboardManager.h"
+#include "Fade.h"
 
 namespace LinuxSampler {
 
@@ -230,20 +231,26 @@ namespace LinuxSampler {
         m_event(NULL), m_fnPlayNote(this), m_fnSetController(this),
         m_fnIgnoreEvent(this), m_fnIgnoreController(this), m_fnNoteOff(this),
         m_fnSetEventMark(this), m_fnDeleteEventMark(this), m_fnByMarks(this),
-        m_fnChangeVol(this), m_fnChangeTune(this), m_fnChangePan(this),
+        m_fnChangeVol(this), m_fnChangeVolTime(this),
+        m_fnChangeTune(this), m_fnChangeTuneTime(this), m_fnChangePan(this),
         m_fnChangeCutoff(this), m_fnChangeReso(this),  m_fnChangeAttack(this),
         m_fnChangeDecay(this), m_fnChangeRelease(this),
         m_fnChangeAmpLFODepth(this), m_fnChangeAmpLFOFreq(this),
         m_fnChangePitchLFODepth(this), m_fnChangePitchLFOFreq(this),
+        m_fnChangeNote(this), m_fnChangeVelo(this),
         m_fnEventStatus(this), m_fnWait2(this), m_fnStopWait(this),
+        m_fnFadeIn(this), m_fnFadeOut(this),
+        m_fnChangeVolCurve(this), m_fnChangeTuneCurve(this),
+        m_fnGetEventPar(this), m_fnSetEventPar(this), m_fnChangePlayPos(this),
         m_varEngineUptime(this), m_varCallbackID(this), m_varAllEvents(this)
     {
         m_CC.size = _MEMBER_SIZEOF(AbstractEngineChannel, ControllerTable);
         m_CC_NUM = DECLARE_VMINT(m_event, class ScriptEvent, cause.Param.CC.Controller);
         m_EVENT_ID = DECLARE_VMINT_READONLY(m_event, class ScriptEvent, id);
-        m_EVENT_NOTE = DECLARE_VMINT(m_event, class ScriptEvent, cause.Param.Note.Key);
-        m_EVENT_VELOCITY = DECLARE_VMINT(m_event, class ScriptEvent, cause.Param.Note.Velocity);
+        m_EVENT_NOTE = DECLARE_VMINT_READONLY(m_event, class ScriptEvent, cause.Param.Note.Key);
+        m_EVENT_VELOCITY = DECLARE_VMINT_READONLY(m_event, class ScriptEvent, cause.Param.Note.Velocity);
         m_KEY_DOWN.size = 128;
+        m_KEY_DOWN.readonly = true;
         m_NI_CALLBACK_TYPE = DECLARE_VMINT_READONLY(m_event, class ScriptEvent, handlerType);
         m_NKSP_IGNORE_WAIT = DECLARE_VMINT(m_event, class ScriptEvent, ignoreAllWaitCalls);
     }
@@ -332,6 +339,16 @@ namespace LinuxSampler {
         for (int i = 0; i < INSTR_SCRIPT_EVENT_GROUPS; ++i) {
             m["$MARK_" + ToString(i+1)] = i;
         }
+        m["$EVENT_PAR_NOTE"] = EVENT_PAR_NOTE;
+        m["$EVENT_PAR_VELOCITY"] = EVENT_PAR_VELOCITY;
+        m["$EVENT_PAR_VOLUME"] = EVENT_PAR_VOLUME;
+        m["$EVENT_PAR_TUNE"] = EVENT_PAR_TUNE;
+        m["$EVENT_PAR_0"] = EVENT_PAR_0;
+        m["$EVENT_PAR_1"] = EVENT_PAR_1;
+        m["$EVENT_PAR_2"] = EVENT_PAR_2;
+        m["$EVENT_PAR_3"] = EVENT_PAR_3;
+        m["$NKSP_LINEAR"] = FADE_CURVE_LINEAR;
+        m["$NKSP_EASE_IN_EASE_OUT"] = FADE_CURVE_EASE_IN_EASE_OUT;
 
         return m;
     }
@@ -358,7 +375,11 @@ namespace LinuxSampler {
         else if (name == "delete_event_mark") return &m_fnDeleteEventMark;
         else if (name == "by_marks") return &m_fnByMarks;
         else if (name == "change_vol") return &m_fnChangeVol;
+        else if (name == "change_vol_time") return &m_fnChangeVolTime;
         else if (name == "change_tune") return &m_fnChangeTune;
+        else if (name == "change_tune_time") return &m_fnChangeTuneTime;
+        else if (name == "change_note") return &m_fnChangeNote;
+        else if (name == "change_velo") return &m_fnChangeVelo;
         else if (name == "change_pan") return &m_fnChangePan;
         else if (name == "change_cutoff") return &m_fnChangeCutoff;
         else if (name == "change_reso") return &m_fnChangeReso;
@@ -369,6 +390,13 @@ namespace LinuxSampler {
         else if (name == "change_amp_lfo_freq") return &m_fnChangeAmpLFOFreq;
         else if (name == "change_pitch_lfo_depth") return &m_fnChangePitchLFODepth;
         else if (name == "change_pitch_lfo_freq") return &m_fnChangePitchLFOFreq;
+        else if (name == "fade_in") return &m_fnFadeIn;
+        else if (name == "fade_out") return &m_fnFadeOut;
+        else if (name == "change_vol_curve") return &m_fnChangeVolCurve;
+        else if (name == "change_tune_curve") return &m_fnChangeTuneCurve;
+        else if (name == "change_play_pos") return &m_fnChangePlayPos;
+        else if (name == "get_event_par") return &m_fnGetEventPar;
+        else if (name == "set_event_par") return &m_fnSetEventPar;
         else if (name == "event_status") return &m_fnEventStatus;
         else if (name == "wait") return &m_fnWait2; // override wait() core implementation
         else if (name == "stop_wait") return &m_fnStopWait;

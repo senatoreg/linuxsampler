@@ -644,8 +644,9 @@ namespace LinuxSampler {
     struct VMInt8Array {
         int8_t* data;
         int size;
+        bool readonly; ///< Whether the array data may be modified or just be read.
 
-        VMInt8Array() : data(NULL), size(0) {}
+        VMInt8Array() : data(NULL), size(0), readonly(false) {}
     };
 
     /** @brief Virtual machine script variable.
@@ -850,6 +851,26 @@ namespace LinuxSampler {
          * @see ScriptVM::exec()
          */
         virtual int suspensionTimeMicroseconds() const = 0;
+
+        /**
+         * Causes all polyphonic variables to be reset to zero values. A
+         * polyphonic variable is expected to be zero when entering a new event
+         * handler instance. As an exception the values of polyphonic variables
+         * shall only be preserved from an note event handler instance to its
+         * correspending specific release handler instance. So in the latter
+         * case the script author may pass custom data from the note handler to
+         * the release handler, but only for the same specific note!
+         */
+        virtual void resetPolyphonicData() = 0;
+
+        /**
+         * Returns amount of virtual machine instructions which have been
+         * performed the last time when this execution context was executing a
+         * script. So in case you need the overall amount of instructions
+         * instead, then you need to add them by yourself after each
+         * ScriptVM::exec() call.
+         */
+        virtual size_t instructionsPerformed() const = 0;
     };
 
     /** @brief Script callback for a certain event.

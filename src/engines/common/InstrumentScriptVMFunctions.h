@@ -46,7 +46,7 @@ namespace LinuxSampler {
     class InstrumentScriptVMFunction_ignore_event : public VMEmptyResultFunction {
     public:
         InstrumentScriptVMFunction_ignore_event(InstrumentScriptVM* parent);
-        int minRequiredArgs() const { return 1; }
+        int minRequiredArgs() const { return 0; }
         int maxAllowedArgs() const { return 1; }
         bool acceptsArgType(int iArg, ExprType_t type) const;
         ExprType_t argType(int iArg) const { return INT_EXPR; }
@@ -236,7 +236,8 @@ namespace LinuxSampler {
         bool acceptsArgType(int iArg, ExprType_t type) const;
         ExprType_t argType(int iArg) const { return INT_EXPR; }
 
-        template<float NoteBase::_Override::*T_noteParam, int T_synthParam>
+        template<float NoteBase::_Override::*T_noteParam, int T_synthParam,
+                 bool T_isNormalizedParam, int T_maxValue, int T_minValue>
         VMFnResult* execTemplate(VMFnArgs* args, const char* functionName);
     protected:
         InstrumentScriptVM* m_vm;
@@ -264,6 +265,128 @@ namespace LinuxSampler {
     public:
         InstrumentScriptVMFunction_change_pitch_lfo_freq(InstrumentScriptVM* parent) : VMChangeSynthParamFunction(parent) {}
         VMFnResult* exec(VMFnArgs* args);
+    };
+
+    class InstrumentScriptVMFunction_change_vol_time : public VMChangeSynthParamFunction {
+    public:
+        InstrumentScriptVMFunction_change_vol_time(InstrumentScriptVM* parent) : VMChangeSynthParamFunction(parent) {}
+        VMFnResult* exec(VMFnArgs* args);
+    };
+
+    class InstrumentScriptVMFunction_change_tune_time : public VMChangeSynthParamFunction {
+    public:
+        InstrumentScriptVMFunction_change_tune_time(InstrumentScriptVM* parent) : VMChangeSynthParamFunction(parent) {}
+        VMFnResult* exec(VMFnArgs* args);
+    };
+
+    class VMChangeFadeCurveFunction : public VMEmptyResultFunction {
+    public:
+        VMChangeFadeCurveFunction(InstrumentScriptVM* parent) : m_vm(parent) {}
+        int minRequiredArgs() const { return 2; }
+        int maxAllowedArgs() const { return 2; }
+        bool acceptsArgType(int iArg, ExprType_t type) const;
+        ExprType_t argType(int iArg) const { return INT_EXPR; }
+
+        template<fade_curve_t NoteBase::_Override::*T_noteParam, int T_synthParam>
+        VMFnResult* execTemplate(VMFnArgs* args, const char* functionName);
+    protected:
+        InstrumentScriptVM* m_vm;
+    };
+
+    class InstrumentScriptVMFunction_change_vol_curve : public VMChangeFadeCurveFunction {
+    public:
+        InstrumentScriptVMFunction_change_vol_curve(InstrumentScriptVM* parent) : VMChangeFadeCurveFunction(parent) {}
+        VMFnResult* exec(VMFnArgs* args);
+    };
+
+    class InstrumentScriptVMFunction_change_tune_curve : public VMChangeFadeCurveFunction {
+    public:
+        InstrumentScriptVMFunction_change_tune_curve(InstrumentScriptVM* parent) : VMChangeFadeCurveFunction(parent) {}
+        VMFnResult* exec(VMFnArgs* args);
+    };
+
+    class InstrumentScriptVMFunction_fade_in : public VMEmptyResultFunction {
+    public:
+        InstrumentScriptVMFunction_fade_in(InstrumentScriptVM* parent);
+        int minRequiredArgs() const { return 2; }
+        int maxAllowedArgs() const { return 2; }
+        bool acceptsArgType(int iArg, ExprType_t type) const;
+        ExprType_t argType(int iArg) const { return INT_EXPR; }
+        VMFnResult* exec(VMFnArgs* args);
+    protected:
+        InstrumentScriptVM* m_vm;
+    };
+
+    class InstrumentScriptVMFunction_fade_out : public VMEmptyResultFunction {
+    public:
+        InstrumentScriptVMFunction_fade_out(InstrumentScriptVM* parent);
+        int minRequiredArgs() const { return 2; }
+        int maxAllowedArgs() const { return 3; }
+        bool acceptsArgType(int iArg, ExprType_t type) const;
+        ExprType_t argType(int iArg) const { return INT_EXPR; }
+        VMFnResult* exec(VMFnArgs* args);
+    protected:
+        InstrumentScriptVM* m_vm;
+    };
+
+    class InstrumentScriptVMFunction_get_event_par : public VMIntResultFunction {
+    public:
+        InstrumentScriptVMFunction_get_event_par(InstrumentScriptVM* parent);
+        int minRequiredArgs() const { return 2; }
+        int maxAllowedArgs() const { return 2; }
+        bool acceptsArgType(int iArg, ExprType_t type) const { return type == INT_EXPR;}
+        ExprType_t argType(int iArg) const { return INT_EXPR; }
+        VMFnResult* exec(VMFnArgs* args);
+    protected:
+        InstrumentScriptVM* m_vm;
+    };
+
+    class InstrumentScriptVMFunction_set_event_par : public VMEmptyResultFunction {
+    public:
+        InstrumentScriptVMFunction_set_event_par(InstrumentScriptVM* parent);
+        int minRequiredArgs() const { return 3; }
+        int maxAllowedArgs() const { return 3; }
+        bool acceptsArgType(int iArg, ExprType_t type) const { return type == INT_EXPR;}
+        ExprType_t argType(int iArg) const { return INT_EXPR; }
+        VMFnResult* exec(VMFnArgs* args);
+    protected:
+        InstrumentScriptVM* m_vm;
+    };
+
+    class InstrumentScriptVMFunction_change_note : public VMEmptyResultFunction {
+    public:
+        InstrumentScriptVMFunction_change_note(InstrumentScriptVM* parent);
+        int minRequiredArgs() const { return 2; }
+        int maxAllowedArgs() const { return 2; }
+        bool acceptsArgType(int iArg, ExprType_t type) const { return type == INT_EXPR;}
+        ExprType_t argType(int iArg) const { return INT_EXPR; }
+        VMFnResult* exec(VMFnArgs* args);
+    protected:
+        InstrumentScriptVM* m_vm;
+    };
+
+    class InstrumentScriptVMFunction_change_velo : public VMEmptyResultFunction {
+    public:
+        InstrumentScriptVMFunction_change_velo(InstrumentScriptVM* parent);
+        int minRequiredArgs() const { return 2; }
+        int maxAllowedArgs() const { return 2; }
+        bool acceptsArgType(int iArg, ExprType_t type) const { return type == INT_EXPR;}
+        ExprType_t argType(int iArg) const { return INT_EXPR; }
+        VMFnResult* exec(VMFnArgs* args);
+    protected:
+        InstrumentScriptVM* m_vm;
+    };
+
+    class InstrumentScriptVMFunction_change_play_pos : public VMEmptyResultFunction {
+    public:
+        InstrumentScriptVMFunction_change_play_pos(InstrumentScriptVM* parent);
+        int minRequiredArgs() const { return 2; }
+        int maxAllowedArgs() const { return 2; }
+        bool acceptsArgType(int iArg, ExprType_t type) const { return type == INT_EXPR; }
+        ExprType_t argType(int iArg) const { return INT_EXPR; }
+        VMFnResult* exec(VMFnArgs* args);
+    protected:
+        InstrumentScriptVM* m_vm;
     };
 
     class InstrumentScriptVMFunction_event_status : public VMIntResultFunction {

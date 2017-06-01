@@ -20,6 +20,7 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <string.h> // for memset()
 #include "../common/global.h"
 #include "../common/Ref.h"
 #include "../common/ArrayList.h"
@@ -35,6 +36,7 @@ enum StmtType_t {
     STMT_LIST,
     STMT_BRANCH,
     STMT_LOOP,
+    STMT_SYNC,
 };
 
 class Node {
@@ -175,7 +177,7 @@ class IntArrayVariable : public Variable, virtual public VMIntArrayExpr {
     ArrayList<int> values;
 public:
     IntArrayVariable(ParserContext* ctx, int size);
-    IntArrayVariable(ParserContext* ctx, int size, ArgsRef values);
+    IntArrayVariable(ParserContext* ctx, int size, ArgsRef values, bool _bConst = false);
     void assign(Expression* expr) {} // ignore scalar assignment
     String evalCastToStr() { return ""; } // ignore scalar cast to string
     ExprType_t exprType() const { return INT_ARR_EXPR; }
@@ -196,6 +198,7 @@ public:
     BuiltInIntArrayVariable(const String& name, VMInt8Array* array);
     int arraySize() const { return array->size; }
     int evalIntElement(uint i);
+    bool isAssignable() const OVERRIDE { return !array->readonly; }
     void assignIntElement(uint i, int value);
     void dump(int level = 0);
 };
@@ -493,6 +496,17 @@ public:
     bool isPolyphonic() const { return m_condition->isPolyphonic() || m_statements->isPolyphonic(); }
 };
 
+class SyncBlock : public Statement {
+    StatementsRef m_statements;
+public:
+    SyncBlock(StatementsRef statements) : m_statements(statements) {}
+    StmtType_t statementType() const { return STMT_SYNC; }
+    void dump(int level = 0);
+    Statements* statements() const;
+    bool isPolyphonic() const { return m_statements->isPolyphonic(); }
+};
+typedef Ref<SyncBlock,Node> SyncBlockRef;
+
 class Neg : public IntExpr {
     IntExprRef expr;
 public:
@@ -679,9 +693,11 @@ public:
     ArrayList<StackFrame> stack;
     int stackFrame;
     int suspendMicroseconds;
+    size_t instructionsCount;
 
     ExecContext() :
-        status(VM_EXEC_NOT_RUNNING), stackFrame(-1), suspendMicroseconds(0) {}
+        status(VM_EXEC_NOT_RUNNING), stackFrame(-1), suspendMicroseconds(0),
+        instructionsCount(0) {}
 
     virtual ~ExecContext() {}
 
@@ -708,6 +724,15 @@ public:
 
     int suspensionTimeMicroseconds() const OVERRIDE {
         return suspendMicroseconds;
+    }
+
+    void resetPolyphonicData() OVERRIDE {
+        if (polyphonicIntMemory.empty()) return;
+        memset(&polyphonicIntMemory[0], 0, polyphonicIntMemory.size() * sizeof(int));
+    }
+
+    size_t instructionsPerformed() const OVERRIDE {
+        return instructionsCount;
     }
 };
 

@@ -64,6 +64,17 @@ enum InstrScriptIDType_T {
 #define EVENT_STATUS_INACTIVE 0
 #define EVENT_STATUS_NOTE_QUEUE 1
 
+enum {
+    EVENT_PAR_NOTE = 1,
+    EVENT_PAR_VELOCITY,
+    EVENT_PAR_VOLUME,
+    EVENT_PAR_TUNE,
+    EVENT_PAR_0 = 1024,
+    EVENT_PAR_1,
+    EVENT_PAR_2,
+    EVENT_PAR_3,
+};
+
 namespace LinuxSampler {
 
     class AbstractEngineChannel;
@@ -269,7 +280,9 @@ namespace LinuxSampler {
         InstrumentScriptVMFunction_delete_event_mark m_fnDeleteEventMark;
         InstrumentScriptVMFunction_by_marks m_fnByMarks;
         InstrumentScriptVMFunction_change_vol m_fnChangeVol;
+        InstrumentScriptVMFunction_change_vol_time m_fnChangeVolTime;
         InstrumentScriptVMFunction_change_tune m_fnChangeTune;
+        InstrumentScriptVMFunction_change_tune_time m_fnChangeTuneTime;
         InstrumentScriptVMFunction_change_pan m_fnChangePan;
         InstrumentScriptVMFunction_change_cutoff m_fnChangeCutoff;
         InstrumentScriptVMFunction_change_reso m_fnChangeReso;
@@ -280,9 +293,18 @@ namespace LinuxSampler {
         InstrumentScriptVMFunction_change_amp_lfo_freq m_fnChangeAmpLFOFreq;
         InstrumentScriptVMFunction_change_pitch_lfo_depth m_fnChangePitchLFODepth;
         InstrumentScriptVMFunction_change_pitch_lfo_freq m_fnChangePitchLFOFreq;
+        InstrumentScriptVMFunction_change_note m_fnChangeNote;
+        InstrumentScriptVMFunction_change_velo m_fnChangeVelo;
         InstrumentScriptVMFunction_event_status m_fnEventStatus;
         InstrumentScriptVMFunction_wait m_fnWait2;
         InstrumentScriptVMFunction_stop_wait m_fnStopWait;
+        InstrumentScriptVMFunction_fade_in m_fnFadeIn;
+        InstrumentScriptVMFunction_fade_out m_fnFadeOut;
+        InstrumentScriptVMFunction_change_vol_curve m_fnChangeVolCurve;
+        InstrumentScriptVMFunction_change_tune_curve m_fnChangeTuneCurve;
+        InstrumentScriptVMFunction_get_event_par m_fnGetEventPar;
+        InstrumentScriptVMFunction_set_event_par m_fnSetEventPar;
+        InstrumentScriptVMFunction_change_play_pos m_fnChangePlayPos;
         InstrumentScriptVMDynVar_ENGINE_UPTIME m_varEngineUptime;
         InstrumentScriptVMDynVar_NI_CALLBACK_ID m_varCallbackID;
         InstrumentScriptVMDynVar_ALL_EVENTS m_varAllEvents;
@@ -296,7 +318,9 @@ namespace LinuxSampler {
         friend class InstrumentScriptVMFunction_delete_event_mark;
         friend class InstrumentScriptVMFunction_by_marks;
         friend class InstrumentScriptVMFunction_change_vol;
+        friend class InstrumentScriptVMFunction_change_vol_time;
         friend class InstrumentScriptVMFunction_change_tune;
+        friend class InstrumentScriptVMFunction_change_tune_time;
         friend class InstrumentScriptVMFunction_change_pan;
         friend class InstrumentScriptVMFunction_change_cutoff;
         friend class InstrumentScriptVMFunction_change_reso;
@@ -308,6 +332,14 @@ namespace LinuxSampler {
         friend class InstrumentScriptVMFunction_change_amp_lfo_freq;
         friend class InstrumentScriptVMFunction_change_pitch_lfo_depth;
         friend class InstrumentScriptVMFunction_change_pitch_lfo_freq;
+        friend class VMChangeFadeCurveFunction;
+        friend class InstrumentScriptVMFunction_fade_in;
+        friend class InstrumentScriptVMFunction_fade_out;
+        friend class InstrumentScriptVMFunction_get_event_par;
+        friend class InstrumentScriptVMFunction_set_event_par;
+        friend class InstrumentScriptVMFunction_change_note;
+        friend class InstrumentScriptVMFunction_change_velo;
+        friend class InstrumentScriptVMFunction_change_play_pos;
         friend class InstrumentScriptVMFunction_event_status;
         friend class InstrumentScriptVMFunction_wait;
         friend class InstrumentScriptVMFunction_stop_wait;
