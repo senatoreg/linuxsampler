@@ -401,6 +401,18 @@ namespace LinuxSampler {
         InstrumentScriptVM* m_vm;
     };
 
+    class InstrumentScriptVMFunction_callback_status : public VMIntResultFunction {
+    public:
+        InstrumentScriptVMFunction_callback_status(InstrumentScriptVM* parent);
+        int minRequiredArgs() const { return 1; }
+        int maxAllowedArgs() const { return 1; }
+        bool acceptsArgType(int iArg, ExprType_t type) const { return type == INT_EXPR;}
+        ExprType_t argType(int iArg) const { return INT_EXPR; }
+        VMFnResult* exec(VMFnArgs* args);
+    protected:
+        InstrumentScriptVM* m_vm;
+    };
+
     // overrides core wait() implementation
     class InstrumentScriptVMFunction_wait : public CoreVMFunction_wait {
     public:
@@ -428,6 +440,18 @@ namespace LinuxSampler {
         bool acceptsArgType(int iArg, ExprType_t type) const { return type == INT_EXPR; }
         ExprType_t argType(int iArg) const { return INT_EXPR; }
         VMFnResult* exec(VMFnArgs* args) OVERRIDE;
+    protected:
+        InstrumentScriptVM* m_vm;
+    };
+
+    class InstrumentScriptVMFunction_fork : public VMIntResultFunction {
+    public:
+        InstrumentScriptVMFunction_fork(InstrumentScriptVM* parent);
+        int minRequiredArgs() const { return 0; }
+        int maxAllowedArgs() const { return 2; }
+        bool acceptsArgType(int iArg, ExprType_t type) const { return type == INT_EXPR;}
+        ExprType_t argType(int iArg) const { return INT_EXPR; }
+        VMFnResult* exec(VMFnArgs* args);
     protected:
         InstrumentScriptVM* m_vm;
     };

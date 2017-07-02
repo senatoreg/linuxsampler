@@ -9,7 +9,8 @@
 
 // This header defines data types shared between the VM core implementation
 // (inside the current source directory) and other parts of the sampler
-// (located at other source directories).
+// (located at other source directories). It also acts as public API of the
+// Real-Time script engine for other applications.
 
 #ifndef LS_INSTR_SCRIPT_PARSER_COMMON_H
 #define LS_INSTR_SCRIPT_PARSER_COMMON_H
@@ -879,6 +880,13 @@ namespace LinuxSampler {
          * instance.
          */
         virtual void signalAbort() = 0;
+
+        /**
+         * Copies the current entire execution state from this object to the
+         * given object. So this can be used to "fork" a new script thread which
+         * then may run independently with its own polyphonic data for instance.
+         */
+        virtual void forkTo(VMExecContext* ectx) const = 0;
     };
 
     /** @brief Script callback for a certain event.
@@ -910,6 +918,24 @@ namespace LinuxSampler {
     };
 
     /**
+     * Reflects the precise position and span of a specific code block within
+     * a script. This is currently only used for the locations of commented
+     * code blocks due to preprocessor statements, and for parser errors and
+     * parser warnings.
+     *
+     * @see ParserIssue for code locations of parser errors and parser warnings
+     *
+     * @see VMParserContext::preprocessorComments() for locations of code which
+     *      have been filtered out by preprocessor statements
+     */
+    struct CodeBlock {
+        int firstLine; ///< The first line number of this code block within the script (indexed with 1 being the very first line).
+        int lastLine; ///< The last line number of this code block within the script.
+        int firstColumn; ///< The first column of this code block within the script (indexed with 1 being the very first column).
+        int lastColumn; ///< The last column of this code block within the script.
+    };
+
+    /**
      * Encapsulates a noteworty parser issue. This encompasses the type of the
      * issue (either a parser error or parser warning), a human readable
      * explanation text of the error or warning and the location of the
@@ -917,12 +943,8 @@ namespace LinuxSampler {
      *
      * @see VMSourceToken for processing syntax highlighting instead.
      */
-    struct ParserIssue {
+    struct ParserIssue : CodeBlock {
         String txt; ///< Human readable explanation text of the parser issue.
-        int firstLine; ///< The first line number within the script where this issue was encountered (indexed with 1 being the very first line).
-        int lastLine; ///< The last line number within the script where this issue was encountered.
-        int firstColumn; ///< The first column within the script where this issue was encountered (indexed with 1 being the very first column).
-        int lastColumn; ///< The last column within the script where this issue was encountered.
         ParserIssueType_t type; ///< Whether this issue is either a parser error or just a parser warning.
 
         /**
@@ -1000,6 +1022,12 @@ namespace LinuxSampler {
          * Same as issues(), but this method only returns parser warnings.
          */
         virtual std::vector<ParserIssue> warnings() const = 0;
+
+        /**
+         * Returns all code blocks of the script which were filtered out by the
+         * preprocessor.
+         */
+        virtual std::vector<CodeBlock> preprocessorComments() const = 0;
 
         /**
          * Returns the translated virtual machine representation of an event
