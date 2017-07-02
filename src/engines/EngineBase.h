@@ -379,9 +379,8 @@ namespace LinuxSampler {
                 }
                 pVoicePool->clear();
 
-                // (re)create event generator
-                if (pEventGenerator) delete pEventGenerator;
-                pEventGenerator = new EventGenerator(pAudioOut->SampleRate());
+                // update event generator
+                pEventGenerator->SetSampleRate(pAudioOut->SampleRate());
 
                 dmsg(1,("Starting disk thread..."));
                 pDiskThread->StartThread();
@@ -1025,6 +1024,10 @@ namespace LinuxSampler {
                 itScriptEvent->executionSlices = 0;
                 itScriptEvent->ignoreAllWaitCalls = false;
                 itScriptEvent->handlerType = pEventHandler->eventHandlerType();
+                itScriptEvent->parentHandlerID = 0;
+                itScriptEvent->childHandlerID[0] = 0;
+                itScriptEvent->autoAbortByParent = false;
+                itScriptEvent->forkIndex = 0;
                 // this is the native representation of the $EVENT_ID script variable
                 itScriptEvent->id =
                     (itEvent->Type == Event::type_note_on)
@@ -1296,13 +1299,21 @@ namespace LinuxSampler {
                             RTList<ScriptEvent>::Iterator itScriptEvent =
                                 pEngineChannel->pScript->pEvents->allocAppend();
 
+                            itScriptEvent->cause = pEventGenerator->CreateEvent(0);
+                            itScriptEvent->cause.Type = (Event::type_t) -1; // some invalid type to avoid random event processing
                             itScriptEvent->cause.pEngineChannel = pEngineChannel;
+                            itScriptEvent->cause.pMidiInputPort = pEngineChannel->GetMidiInputPort();
+                            itScriptEvent->id = 0;
                             itScriptEvent->handlers[0] = pEngineChannel->pScript->handlerInit;
                             itScriptEvent->handlers[1] = NULL;
                             itScriptEvent->currentHandler = 0;
                             itScriptEvent->executionSlices = 0;
                             itScriptEvent->ignoreAllWaitCalls = false;
                             itScriptEvent->handlerType = VM_EVENT_HANDLER_INIT;
+                            itScriptEvent->parentHandlerID = 0;
+                            itScriptEvent->childHandlerID[0] = 0;
+                            itScriptEvent->autoAbortByParent = false;
+                            itScriptEvent->forkIndex = 0;
 
                             VMExecStatus_t res;
                             size_t instructionsCount = 0;
