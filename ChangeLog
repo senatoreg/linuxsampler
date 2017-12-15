@@ -1,5 +1,12 @@
 Version SVN trunk (?)
 
+  * Real-time instrument scripts:
+    - Fixed behavior of built-in NKSP functions change_sustain(),
+      change_cutoff_attack(), change_cutoff_decay(), change_cutoff_sustain()
+      and change_cutoff_release().
+
+Version 2.1.0 (25 Nov 2017)
+
   * SFZ format engine:
     - added support for <global>, <master> and #define (patch by Alby M)
     - Removed code duplication in SFZ file loading code.
@@ -12,6 +19,13 @@ Version SVN trunk (?)
   * Gigasampler/GigaStudio format engine:
     - Fixed clicks and pumping noise with Lowpass Turbo filter on very low
       cutoff settings.
+    - Got rid of resembling an ancient GSt misbehavior which did not pitch at
+      all if an up-pitch of more than 40 semi tones was requested (I don't
+      think there is any stock gig sound that requires this behavior to
+      resemble its original sound).
+    - Added support for controlling whether the individual EGADSR stages may
+      be aborted (as LinuxSampler extension to the original GigaStudio 4
+      format).
 
   * general changes:
     - fixed printf type errors (mostly in debug messages)
@@ -47,12 +61,23 @@ Version SVN trunk (?)
     - Fixed invalid (note-on) event ID being assigned to new Note objects.
     - Revised fundamental C++ classes "Thread", "Mutex" and "Condition" which
       fixes potential undefined behavior.
+    - Fixed Note object leak when triggering notes on keys which did not
+      have a valid sample mapped (fixes bug #252).
+    - Fixed compilation errors when compiling with CONFIG_DEVMODE enabled.
+    - linuxsampler binary fix: option --create-instruments-db ignored
+      subsequent optional argument due to glibc's implementation oddity
+      which expects a "=" sign, but no space between them.
 
   * packaging changes:
     - removed unnecessary dependency to libuuid
       (originated by libgig's usage of it)
     - Automake: set environment variable GCC_COLORS=auto to allow GCC to
       auto detect whether it (sh/c)ould output its messages in color.
+    - Debian: Fixed packaging error about invalid "Source-Version"
+      substitution variable.
+    - Debian: Raised Debian compatibility level to Debian 9 "Stretch".
+    - Debian: Added build dependency to libsqlite3-dev for building
+      linuxsampler with instruments DB support.
 
   * Real-time instrument scripts:
     - Implemented scheduler for delayed MIDI events and for suspended scripts.
@@ -221,6 +246,27 @@ Version SVN trunk (?)
     - Added built-in constant $CALLBACK_STATUS_TERMINATED.
     - Added built-in constant $CALLBACK_STATUS_QUEUE.
     - Added built-in constant $CALLBACK_STATUS_RUNNING.
+    - Removed max. value limitation of built-in functions "change_attack()",
+      "change_decay()" and "change_release()" to i.e. allow passing 2000000
+      for doubling the respective time.
+    - NKSP script editor syntax highlighting API: Fixed app termination due
+      to a lexer start condition stack underrun.
+    - NKSP preprocessor: Fixed wrong behavior on nested USE_CODE_IF() and
+      USE_CODE_IF_NOT() preprocessor statements.
+    - NKSP: Added built-in preprocessor condition NKSP_NO_MESSAGE, which
+      can be set to disable all subsequent built-in "message()" function calls
+      on preprocessor level.
+    - Implemented built-in script function "change_sustain()".
+    - NKSP script editor syntax highlighting API: catch all fatal lexer errors,
+      to avoid the editor app to crash on ill-formed text input.
+    - Added built-in script function "change_pan_time()".
+    - Added built-in script function "change_pan_curve()".
+    - Added built-in script function "change_cutoff_attack()".
+    - Added built-in script function "change_cutoff_decay()".
+    - Added built-in script function "change_cutoff_sustain()".
+    - Added built-in script function "change_cutoff_release()".
+    - Added built-in script function "change_cutoff_lfo_depth()".
+    - Added built-in script function "change_cutoff_lfo_freq()".
 
   * Instruments DB:
     - Fixed memory access bug of general DB access code which lead to

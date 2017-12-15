@@ -1,3 +1,28 @@
+linuxsampler (2.1.0-1) unstable; urgency=low
+
+  * New release.
+  * liblinuxsampler shared library (liblinuxsampler.so) is now at
+    version 5.0.0.
+
+ -- Christian Schoenebeck <cuse@users.sourceforge.net>  Sat, 25 Nov 2017 18:06:36 +0100
+
+linuxsampler (2.0.0-1+svn76) unreleased; urgency=low
+
+  * Added build dependency to libsqlite3-dev for building linuxsampler
+    with instruments DB support.
+  * Added config file /etc/ld.so.conf.d/linuxsampler.conf instead of fiddling
+    with /etc/ld.so.conf directly with postinst and postrm scripts before.
+
+ -- Christian Schoenebeck <cuse@users.sourceforge.net>  Fri, 13 Oct 2017 18:08:56 +0200
+
+linuxsampler (2.0.0-1+svn75) unreleased; urgency=low
+
+  * Fixed packaging error about invalid "Source-Version" substitution
+    variable.
+  * Raised Debian compatibility level to Debian 9 "Stretch".
+
+ -- Christian Schoenebeck <cuse@users.sourceforge.net>  Sat, 07 Oct 2017 18:35:17 +0200
+
 linuxsampler (2.0.0-1+svn1) unreleased; urgency=low
 
   * Require libgig version >= 4.0.0 as build dependency.

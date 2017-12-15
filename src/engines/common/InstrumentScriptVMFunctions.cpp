@@ -838,10 +838,9 @@ namespace LinuxSampler {
 
     VMFnResult* InstrumentScriptVMFunction_change_attack::exec(VMFnArgs* args) {
         int attack = args->arg(1)->asInt()->evalInt();
-        if (attack > VM_EG_PAR_MAX_VALUE) {
-            wrnMsg("change_attack(): argument 2 may not be larger than 1000000");
-            attack = VM_EG_PAR_MAX_VALUE;
-        } else if (attack < 0) {
+        // note: intentionally not checking against a max. value here!
+        // (to allow i.e. passing 2000000 for doubling the attack time)
+        if (attack < 0) {
             wrnMsg("change_attack(): argument 2 may not be negative");
             attack = 0;
         }
@@ -925,10 +924,9 @@ namespace LinuxSampler {
 
     VMFnResult* InstrumentScriptVMFunction_change_decay::exec(VMFnArgs* args) {
         int decay = args->arg(1)->asInt()->evalInt();
-        if (decay > VM_EG_PAR_MAX_VALUE) {
-            wrnMsg("change_decay(): argument 2 may not be larger than 1000000");
-            decay = VM_EG_PAR_MAX_VALUE;
-        } else if (decay < 0) {
+        // note: intentionally not checking against a max. value here!
+        // (to allow i.e. passing 2000000 for doubling the decay time)
+        if (decay < 0) {
             wrnMsg("change_decay(): argument 2 may not be negative");
             decay = 0;
         }
@@ -1012,10 +1010,9 @@ namespace LinuxSampler {
 
     VMFnResult* InstrumentScriptVMFunction_change_release::exec(VMFnArgs* args) {
         int release = args->arg(1)->asInt()->evalInt();
-        if (release > VM_EG_PAR_MAX_VALUE) {
-            wrnMsg("change_release(): argument 2 may not be larger than 1000000");
-            release = VM_EG_PAR_MAX_VALUE;
-        } else if (release < 0) {
+        // note: intentionally not checking against a max. value here!
+        // (to allow i.e. passing 2000000 for doubling the release time)
+        if (release < 0) {
             wrnMsg("change_release(): argument 2 may not be negative");
             release = 0;
         }
@@ -1177,6 +1174,51 @@ namespace LinuxSampler {
         return successResult();
     }
 
+    // change_sustain() function
+
+    VMFnResult* InstrumentScriptVMFunction_change_sustain::exec(VMFnArgs* args) {
+        return VMChangeSynthParamFunction::execTemplate<
+                    &NoteBase::_Override::Sustain,
+                    Event::synth_param_sustain,
+                    false, NO_LIMIT, 0>( args, "change_sustain" );
+    }
+
+    // change_cutoff_attack() function
+
+    VMFnResult* InstrumentScriptVMFunction_change_cutoff_attack::exec(VMFnArgs* args) {
+        return VMChangeSynthParamFunction::execTemplate<
+                    &NoteBase::_Override::CutoffAttack,
+                    Event::synth_param_cutoff_attack,
+                    false, NO_LIMIT, 0>( args, "change_cutoff_attack" );
+    }
+
+    // change_cutoff_decay() function
+
+    VMFnResult* InstrumentScriptVMFunction_change_cutoff_decay::exec(VMFnArgs* args) {
+        return VMChangeSynthParamFunction::execTemplate<
+                    &NoteBase::_Override::CutoffDecay,
+                    Event::synth_param_cutoff_decay,
+                    false, NO_LIMIT, 0>( args, "change_cutoff_decay" );
+    }
+
+    // change_cutoff_sustain() function
+
+    VMFnResult* InstrumentScriptVMFunction_change_cutoff_sustain::exec(VMFnArgs* args) {
+        return VMChangeSynthParamFunction::execTemplate<
+                    &NoteBase::_Override::CutoffSustain,
+                    Event::synth_param_cutoff_sustain,
+                    false, NO_LIMIT, 0>( args, "change_cutoff_sustain" );
+    }
+
+    // change_cutoff_release() function
+
+    VMFnResult* InstrumentScriptVMFunction_change_cutoff_release::exec(VMFnArgs* args) {
+        return VMChangeSynthParamFunction::execTemplate<
+                    &NoteBase::_Override::CutoffRelease,
+                    Event::synth_param_cutoff_release,
+                    false, NO_LIMIT, 0>( args, "change_cutoff_release" );
+    }
+
     // change_amp_lfo_depth() function
 
     VMFnResult* InstrumentScriptVMFunction_change_amp_lfo_depth::exec(VMFnArgs* args) {
@@ -1193,6 +1235,24 @@ namespace LinuxSampler {
                     &NoteBase::_Override::AmpLFOFreq,
                     Event::synth_param_amp_lfo_freq,
                     true, 1000000, 0>( args, "change_amp_lfo_freq" );
+    }
+
+    // change_cutoff_lfo_depth() function
+
+    VMFnResult* InstrumentScriptVMFunction_change_cutoff_lfo_depth::exec(VMFnArgs* args) {
+        return VMChangeSynthParamFunction::execTemplate<
+                    &NoteBase::_Override::CutoffLFODepth,
+                    Event::synth_param_cutoff_lfo_depth,
+                    true, 1000000, 0>( args, "change_cutoff_lfo_depth" );
+    }
+
+    // change_cutoff_lfo_freq() function
+
+    VMFnResult* InstrumentScriptVMFunction_change_cutoff_lfo_freq::exec(VMFnArgs* args) {
+        return VMChangeSynthParamFunction::execTemplate<
+                    &NoteBase::_Override::CutoffLFOFreq,
+                    Event::synth_param_cutoff_lfo_freq,
+                    true, 1000000, 0>( args, "change_cutoff_lfo_freq" );
     }
 
     // change_pitch_lfo_depth() function
@@ -1229,6 +1289,15 @@ namespace LinuxSampler {
                     &NoteBase::_Override::PitchTime,
                     Event::synth_param_pitch_time,
                     false, NO_LIMIT, 0>( args, "change_tune_time" );
+    }
+
+    // change_pan_time() function
+
+    VMFnResult* InstrumentScriptVMFunction_change_pan_time::exec(VMFnArgs* args) {
+        return VMChangeSynthParamFunction::execTemplate<
+        &NoteBase::_Override::PanTime,
+        Event::synth_param_pan_time,
+        false, NO_LIMIT, 0>( args, "change_pan_time" );
     }
 
     // template for change_*_curve() functions
@@ -1330,6 +1399,14 @@ namespace LinuxSampler {
         return VMChangeFadeCurveFunction::execTemplate<
                     &NoteBase::_Override::PitchCurve,
                     Event::synth_param_pitch_curve>( args, "change_tune_curve" );
+    }
+
+    // change_pan_curve() function
+
+    VMFnResult* InstrumentScriptVMFunction_change_pan_curve::exec(VMFnArgs* args) {
+        return VMChangeFadeCurveFunction::execTemplate<
+        &NoteBase::_Override::PanCurve,
+        Event::synth_param_pan_curve>( args, "change_pan_curve" );
     }
 
     // fade_in() function
