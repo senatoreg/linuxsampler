@@ -2,9 +2,10 @@ Source: linuxsampler
 Section: sound
 Priority: optional
 Maintainer: LinuxSampler Developers <linuxsampler-devel@lists.sourceforge.net>
-Build-Depends: debhelper (>= 4.0.0), libgig-dev (>= 4.0.0),
-               libasound2-dev | libjack-dev, dssi-dev, lv2-dev
-Standards-Version: 3.6.1
+Build-Depends: debhelper (>= 4.0.0), libgig-dev (>= 4.1.0),
+               libasound2-dev | libjack-dev, dssi-dev, lv2-dev,
+               libsqlite3-dev
+Standards-Version: 4.0.0
 
 Package: linuxsampler
 Section: sound
