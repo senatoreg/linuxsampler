@@ -117,7 +117,7 @@ namespace LinuxSampler {
         public:
             bool            KeyPressed;     ///< Is true if the respective MIDI key is currently pressed.
             bool            Active;         ///< If the key contains active voices.
-            bool            ReleaseTrigger; ///< If we have to launch release triggered voice(s) when the key is released
+            release_trigger_t ReleaseTrigger; ///< If we have to launch release triggered voice(s) when either the key or sustain pedal is released.
             Pool<uint>::Iterator itSelf;    ///< hack to allow fast deallocation of the key from the list of active keys
             RTList<Event>*  pEvents;        ///< Key specific events (only Note-on, Note-off and sustain pedal currently)
             int             VoiceTheftsQueued; ///< Amount of voices postponed due to shortage of voices.
@@ -143,7 +143,7 @@ namespace LinuxSampler {
         uint32_t              RoundRobinIndexes[128];
         int8_t                KeyDown[128]; ///< True if the respective key is currently pressed down. Currently only used as built-in instrument script array variable %KEY_DOWN. It is currently not used by the sampler for any other purpose.
 
-        virtual void ProcessReleaseTrigger(RTList<Event>::Iterator& itEvent) = 0;
+        virtual void ProcessReleaseTriggerBySustain(RTList<Event>::Iterator& itEvent) = 0;
     };
 
     template <class V>
@@ -172,7 +172,7 @@ namespace LinuxSampler {
                     pActiveNotes   = NULL;
                     KeyPressed     = false;
                     Active         = false;
-                    ReleaseTrigger = false;
+                    ReleaseTrigger = release_trigger_none;
                     pEvents        = NULL;
                     VoiceTheftsQueued = 0;
                     Volume = 1.0f;
@@ -192,7 +192,7 @@ namespace LinuxSampler {
                     if (pEvents) pEvents->clear();
                     KeyPressed        = false;
                     Active            = false;
-                    ReleaseTrigger    = false;
+                    ReleaseTrigger    = release_trigger_none;
                     itSelf            = Pool<uint>::Iterator();
                     VoiceTheftsQueued = 0;
                     Volume = 1.0f;
@@ -372,7 +372,7 @@ namespace LinuxSampler {
                     pKey->Active = false;
                     pActiveKeys->free(pKey->itSelf); // remove key from list of active keys
                     pKey->itSelf = RTList<uint>::Iterator();
-                    pKey->ReleaseTrigger = false;
+                    pKey->ReleaseTrigger = release_trigger_none;
                     pKey->pEvents->clear();
                     dmsg(3,("Key has no more voices now\n"));
                 }
@@ -701,17 +701,22 @@ namespace LinuxSampler {
                             itNewEvent->Type = Event::type_release_key; // transform event type
                             itNewEvent->Param.Note.Key = *iuiKey;
                             itNewEvent->Param.Note.Velocity = 127;
-                            if (!SostenutoActiveOnKey(*iuiKey)) {
+
+                            // process release trigger (if requested)
+                            if (pKey->ReleaseTrigger & release_trigger_sustain) {
+                                if (pKey->ReleaseTrigger & release_trigger_sustain_keyvelocity)
+                                    itNewEvent->Param.Note.Velocity = pKey->Velocity;
+
                                 //HACK: set sustain CC (64) as "pressed down" for a short moment, so that release trigger voices can distinguish between note off and sustain pedal up cases
                                 AbstractEngineChannel* pChannel = (AbstractEngineChannel*) itEvent->pEngineChannel;
                                 const int8_t CC64Value = pChannel->ControllerTable[64];
                                 pChannel->ControllerTable[64] = 127;
 
                                 // now spawn release trigger voices (if required)
-                                ProcessReleaseTrigger(itNewEvent);
+                                ProcessReleaseTriggerBySustain(itNewEvent);
 
                                 //HACK: reset sustain pedal CC value to old one (see comment above)
-                                pChannel->ControllerTable[64] = CC64Value;
+                                pChannel->ControllerTable[64] = CC64Value;   
                             }
                         }
                         else dmsg(1,("Event pool emtpy!\n"));
