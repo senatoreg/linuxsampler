@@ -17,6 +17,7 @@ ConditionTest::ConditionChecker::ConditionChecker(bool waitFor) : Thread(false, 
 int ConditionTest::ConditionChecker::Main() {
     condition.WaitAndUnlockIf(!waitFor);
     resource++;
+    return 0;
 }
 
 
@@ -31,6 +32,7 @@ ConditionTest::ConditionSetter::ConditionSetter(Condition* condition, bool toSet
 int ConditionTest::ConditionSetter::Main() {
     condition->Set(toSet);
     resource++;
+    return 0;
 }
 
 
@@ -52,6 +54,7 @@ int ConditionTest::ConditionCheckerLocking::Main() {
 #endif
 	}
     staticcondition.Unlock();
+    return 0;
 }
 
 

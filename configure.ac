@@ -3,7 +3,7 @@
 
 m4_define(linuxsampler_release_major, 2)
 m4_define(linuxsampler_release_minor, 1)
-m4_define(linuxsampler_release_build, 0.svn8)
+m4_define(linuxsampler_release_build, 1.svn23)
 
 
 AC_INIT([linuxsampler],[linuxsampler_release_major.linuxsampler_release_minor.linuxsampler_release_build])
@@ -63,6 +63,12 @@ PKG_PROG_PKG_CONFIG
 # General Checks
 
 AM_CONDITIONAL(CROSS_COMPILING, test $cross_compiling = yes)
+
+# make sure C++14 is supported by compiler
+# (add CXXFLAGS if required [e.g. -std=c++14])
+m4_ifdef([m4_include(m4/ax_cxx_compile_stdcxx.m4)],,
+             [sinclude([m4/ax_cxx_compile_stdcxx.m4])])
+AX_CXX_COMPILE_STDCXX(14, [], mandatory)
 
 AC_MSG_CHECKING([whether x86 architecture])
 def_arch_x86=0
@@ -604,7 +610,7 @@ fi
 # Checks for various DLL libraries
 
 # Check presence of libgig
-libgig_version="4.1.0"
+libgig_version="4.2.0"
 PKG_CHECK_MODULES(GIG, gig >= $libgig_version, HAVE_GIG=true, HAVE_GIG=false)
 if test "$HAVE_GIG" = "false"; then
     echo "Required libgig version not found!"

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 Christian Schoenebeck
+ * Copyright (c) 2016 - 2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -15,12 +15,12 @@
 
 namespace LinuxSampler {
 
-int CoreVMDynVar_NKSP_REAL_TIMER::evalInt() {
-    return (int) RTMath::unsafeMicroSeconds(RTMath::real_clock);
+vmint CoreVMDynVar_NKSP_REAL_TIMER::evalInt() {
+    return (vmint) RTMath::unsafeMicroSeconds(RTMath::real_clock);
 }
 
-int CoreVMDynVar_NKSP_PERF_TIMER::evalInt() {
-    return (int) RTMath::unsafeMicroSeconds(RTMath::thread_clock);
+vmint CoreVMDynVar_NKSP_PERF_TIMER::evalInt() {
+    return (vmint) RTMath::unsafeMicroSeconds(RTMath::thread_clock);
 }
 
 } // namespace LinuxSampler

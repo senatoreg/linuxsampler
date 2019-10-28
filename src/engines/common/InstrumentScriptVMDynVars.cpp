@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 - 2017 Christian Schoenebeck
+ * Copyright (c) 2016 - 2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -17,7 +17,7 @@ namespace LinuxSampler {
 
     // built-in variable $ENGINE_UPTIME
 
-    int InstrumentScriptVMDynVar_ENGINE_UPTIME::evalInt() {
+    vmint InstrumentScriptVMDynVar_ENGINE_UPTIME::evalInt() {
 
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
@@ -26,13 +26,13 @@ namespace LinuxSampler {
             static_cast<AbstractEngine*>(pEngineChannel->GetEngine());
 
         // engine's official playback time in milliseconds (offline bounce safe)
-        return int( double(pEngine->FrameTime + m_vm->m_event->cause.FragmentPos()) /
-                    double(pEngine->SampleRate) * 1000.0 );
+        return vmint( double(pEngine->FrameTime + m_vm->m_event->cause.FragmentPos()) /
+                      double(pEngine->SampleRate) * 1000.0 );
     }
 
     // built-in variable $NI_CALLBACK_ID
 
-    int InstrumentScriptVMDynVar_NI_CALLBACK_ID::evalInt() {
+    vmint InstrumentScriptVMDynVar_NI_CALLBACK_ID::evalInt() {
 
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
@@ -51,11 +51,11 @@ namespace LinuxSampler {
         return const_cast<VMIntArrayExpr*>( dynamic_cast<const VMIntArrayExpr*>(this) );
     }
 
-    int InstrumentScriptVMDynVar_NKSP_CALLBACK_CHILD_ID::arraySize() const {
+    vmint InstrumentScriptVMDynVar_NKSP_CALLBACK_CHILD_ID::arraySize() const {
         return m_vm->m_event->countChildHandlers();
     }
 
-    int InstrumentScriptVMDynVar_NKSP_CALLBACK_CHILD_ID::evalIntElement(uint i) {
+    vmint InstrumentScriptVMDynVar_NKSP_CALLBACK_CHILD_ID::evalIntElement(vmuint i) {
         if (i >= arraySize()) return 0;
         return m_vm->m_event->childHandlerID[i];
     }
@@ -78,11 +78,11 @@ namespace LinuxSampler {
         return const_cast<VMIntArrayExpr*>( dynamic_cast<const VMIntArrayExpr*>(this) );
     }
 
-    int InstrumentScriptVMDynVar_ALL_EVENTS::arraySize() const {
+    vmint InstrumentScriptVMDynVar_ALL_EVENTS::arraySize() const {
         return m_numIDs;
     }
 
-    int InstrumentScriptVMDynVar_ALL_EVENTS::evalIntElement(uint i) {
+    vmint InstrumentScriptVMDynVar_ALL_EVENTS::evalIntElement(vmuint i) {
         if (i >= m_numIDs) return 0;
         return m_ids[i];
     }
@@ -95,7 +95,7 @@ namespace LinuxSampler {
         m_numIDs = pEngineChannel->AllNoteIDs(&m_ids[0], GLOBAL_MAX_NOTES);
 
         // translate sampler engine internal note IDs to public script id scope
-        for (uint i = 0; i < m_numIDs; ++i)
+        for (vmuint i = 0; i < m_numIDs; ++i)
             m_ids[i] = ScriptID::fromNoteID(m_ids[i]);
     }
 

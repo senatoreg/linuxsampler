@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- *   Copyright (C) 2005 - 2017 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2019 Christian Schoenebeck                       *
  *                                                                         *
  *   This library is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -21,48 +21,33 @@
 #ifndef __LS_LFOBASE_H__
 #define __LS_LFOBASE_H__
 
-#include "../../common/global.h"
+#include "../LFO.h"
 #include "../../common/RTMath.h"
-
-// IDs of the two possible implementations
-// we get the implementation to pick from config.h
-// the implementation IDs should be the same like in benchmarks/triang.cpp !
-#define INT_MATH_SOLUTION       2
-#define DI_HARMONIC_SOLUTION    3
-#define INT_ABS_MATH_SOLUTION   5
 
 #include <math.h>
 #include <stdint.h>
 
 namespace LinuxSampler {
 
-    // *************** types ***************
-    // *
-
-    /**
-     * Whether the LFO should have positive AND negative value range
-     * (signed) or only a positive value range (unsigned).
+    /** @brief POD base for all LFO implementations.
+     *
+     * This structure acts as POD (Plain Old Data structure) base for all LFO
+     * implementations. For efficiency reasons all our LFOs are C++ template
+     * classes. By deriving all those LFO C++ templase classes from this
+     * POD structure, it allows us to at least do a unified @code delete for
+     * any LFO object, which would not work on @code void* pointers (correctly).
+     *
+     * ATM this is actually only used in LFO.cpp.
      */
-    enum range_type_t {
-        range_signed,  ///< LFO's level will wave between -max ... +max
-        range_unsigned ///< LFO's level will wave between 0 ... +max
-    };
-
-    /**
-     * Defines the start level of the LFO wave within the given value range.
-     */
-    enum start_level_t {
-        start_level_max, ///< wave starts from given max. level
-        start_level_mid, ///< wave starts from the middle of the given value range
-        start_level_min  ///< wave starts from given min. level
+    struct LFOPOD {
     };
 
     /** @brief LFO (abstract base class)
      * 
      * Abstract base class for all Low Frequency Oscillator implementations.
      */
-    template<range_type_t RANGE>
-    class LFOBase {
+    template<LFO::range_type_t RANGE>
+    class LFOBase : public LFOPOD {
         public:
 
             // *************** attributes ***************
@@ -88,9 +73,8 @@ namespace LinuxSampler {
                 this->ExtControlDepthCoeff = 0;
                 this->ScriptDepthFactor = 1.f;
                 this->ScriptFrequencyFactor = 1.f;
-            }
-
-            virtual ~LFOBase() {
+                this->pFinalDepth = NULL;
+                this->pFinalFrequency = NULL;
             }
 
             /**
@@ -123,7 +107,7 @@ namespace LinuxSampler {
              * @param SampleRate      - current sample rate of the engines
              *                          audio output signal
              */
-            virtual void trigger(float Frequency, start_level_t StartLevel, uint16_t InternalDepth, uint16_t ExtControlDepth, bool FlipPhase, unsigned int SampleRate) = 0;
+            virtual void trigger(float Frequency, LFO::start_level_t StartLevel, uint16_t InternalDepth, uint16_t ExtControlDepth, bool FlipPhase, unsigned int SampleRate) = 0;
 
         protected:
             float Max;
@@ -133,6 +117,8 @@ namespace LinuxSampler {
             float ExtControlDepthCoeff; ///< A usually constant factor used to convert a new MIDI controller value from range 0-127 to the required internal implementation dependent value range.
             float ScriptDepthFactor; ///< Usually neutral (1.0), only altered by external RT instrument script functions.
             float ScriptFrequencyFactor; ///< Usually neutral (1.0), only altered by external RT instrument script functions.
+            float* pFinalDepth; ///< Usually NULL; it may be set to one of above's member variables in order to process that and ignore all other sources for LFO depth.
+            float* pFinalFrequency; ///< Usually NULL; it may be set to one of above's member variables in order to process that and ignore all other sources for LFO frequency.
     };
 
 } // namespace LinuxSampler

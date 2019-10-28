@@ -112,7 +112,7 @@ namespace LinuxSampler {
 
             void ScheduleResumeOfScriptCallback(RTList<ScriptEvent>::Iterator& itCallback, sched_time_t now, bool forever);
 
-            bool hasFreeScriptCallbacks(int n) const {
+            bool hasFreeScriptCallbacks(vmint n) const {
                 return pScript->pEvents->poolHasFreeElements(n);
             }
 
@@ -200,8 +200,8 @@ namespace LinuxSampler {
             virtual void RemoveAllFxSends();
 
             void ImportEvents(uint Samples);
-            virtual note_id_t ScheduleNoteMicroSec(const Event* pEvent, int delay) = 0;
-            event_id_t ScheduleEventMicroSec(const Event* pEvent, int delay);
+            virtual note_id_t ScheduleNoteMicroSec(const Event* pEvent, int64_t delay) = 0;
+            event_id_t ScheduleEventMicroSec(const Event* pEvent, int64_t delay);
             void IgnoreEvent(event_id_t id);
             virtual void IgnoreNote(note_id_t id) = 0;
             void IgnoreEventByScriptID(const ScriptID& id);

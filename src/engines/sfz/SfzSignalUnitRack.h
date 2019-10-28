@@ -27,9 +27,7 @@
 #include "EG.h"
 #include "EGADSR.h"
 #include "../common/AbstractVoice.h"
-#include "../common/PulseLFO.h"
-#include "../common/SawLFO.h"
-#include "../common/SineLFO.h"
+#include "../common/LFOAll.h"
 
 namespace LinuxSampler { namespace sfz {
     const int MaxUnitCount = 200;
@@ -238,7 +236,7 @@ namespace LinuxSampler { namespace sfz {
         public:
             virtual float Render() = 0;
             virtual void Update(const uint16_t& ExtControlValue) = 0;
-            virtual void Trigger(float Frequency, start_level_t StartLevel, uint16_t InternalDepth, uint16_t ExtControlDepth, bool FlipPhase, unsigned int SampleRate) = 0;
+            virtual void Trigger(float Frequency, LFO::start_level_t StartLevel, uint16_t InternalDepth, uint16_t ExtControlDepth, bool FlipPhase, unsigned int SampleRate) = 0;
             virtual void SetPhase(float phase) = 0;
             virtual void SetFrequency(float Frequency, unsigned int SampleRate) = 0;
     };
@@ -252,7 +250,7 @@ namespace LinuxSampler { namespace sfz {
             virtual void Update(const uint16_t& ExtControlValue) { T::updateByMIDICtrlValue(ExtControlValue); }
             
             virtual void Trigger (
-                float Frequency, start_level_t StartLevel, uint16_t InternalDepth,
+                float Frequency, LFO::start_level_t StartLevel, uint16_t InternalDepth,
                 uint16_t ExtControlDepth, bool FlipPhase, unsigned int SampleRate
             ) {
                 T::trigger(Frequency, StartLevel, InternalDepth, ExtControlDepth, FlipPhase, SampleRate);
@@ -307,7 +305,7 @@ namespace LinuxSampler { namespace sfz {
     class LFOv1Unit: public LFOUnit {
         public:
             ::sfz::LFO lfoInfo;
-            LfoBase<LFOSigned> lfo;
+            LfoBase<LFOTriangleSigned> lfo;
             
             LFOv1Unit(SfzSignalUnitRack* rack): LFOUnit(rack), lfo(1200.0f) {
                 pLfoInfo = &lfoInfo; pLFO = &lfo;
@@ -319,14 +317,14 @@ namespace LinuxSampler { namespace sfz {
     class LFOv2Unit: public LFOUnit, public EqUnitSupport {
         protected:
             FixedArray<AbstractLfo*> lfos;
-            LfoBase<LFOSigned>                       lfo0; // triangle
-            LfoBase<SineLFO<range_signed> >          lfo1; // sine
-            LfoBase<PulseLFO<range_unsigned, 750> >  lfo2; // pulse 75%
-            LfoBase<SquareLFO<range_signed> >        lfo3; // square
-            LfoBase<PulseLFO<range_unsigned, 250> >  lfo4; // pulse 25%
-            LfoBase<PulseLFO<range_unsigned, 125> >  lfo5; // pulse 12,5%
-            LfoBase<SawLFO<range_unsigned, true> >   lfo6; // saw up
-            LfoBase<SawLFO<range_unsigned, false> >  lfo7; // saw down
+            LfoBase<LFOTriangleSigned>                   lfo0; // triangle
+            LfoBase<LFOSineSigned>                       lfo1; // sine
+            LfoBase<LFOPulse<LFO::range_unsigned, 750> > lfo2; // pulse 75%
+            LfoBase<LFOSquareSigned>                     lfo3; // square
+            LfoBase<LFOPulse<LFO::range_unsigned,250>>   lfo4; // pulse 25%
+            LfoBase<LFOPulse<LFO::range_unsigned,125>>   lfo5; // pulse 12,5%
+            LfoBase<SawUpLFO<LFO::range_unsigned>>       lfo6; // saw up
+            LfoBase<SawDownLFO<LFO::range_unsigned>>     lfo7; // saw down
             
             
         public:

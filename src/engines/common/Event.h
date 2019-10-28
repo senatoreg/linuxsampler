@@ -3,7 +3,7 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003, 2004 by Benno Senoner and Christian Schoenebeck   *
- *   Copyright (C) 2005 - 2017 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2019 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -30,6 +30,14 @@
 #include "../../common/Pool.h"
 #include "../EngineChannel.h"
 #include "../../scriptvm/common.h"
+
+// On Windows RELATIVE might be defined as macro in wingdi.h, which would
+// cause a compiler error of the same token used in this header file below.
+// So we undefine that macro here for now (if present).
+#ifdef RELATIVE
+# warning Preprocessor conflict detected: Macro RELATIVE was declared by system headers; undefining it here.
+# undef RELATIVE
+#endif
 
 namespace LinuxSampler {
 
@@ -197,6 +205,41 @@ namespace LinuxSampler {
                 synth_param_pitch_lfo_depth,
                 synth_param_pitch_lfo_freq,
             };
+            enum class ValueScope : unsigned char {
+                /**
+                 * The new synthesis parameter value should be applied
+                 * relatively to itself (as normalized value range), and then
+                 * applied relatively against other sources (i.e. LFOs, EGs)
+                 * for the same synthesis parameter.
+                 */
+                SELF_RELATIVE = 1,
+                /**
+                 * The new synthesis paramater value of itself should be
+                 * replaced, and then applied relatively to other sources
+                 * (i.e. LFOs, EGs) for the same synthesis parameter.
+                 */
+                RELATIVE = 0, //IMPORANT: must remain 0 because of the union structure below which would otherwise i.e. assign invalid pointers/IDs to Param.Note structure in Init()
+                /**
+                 * The new synthesis parameter value should be applied
+                 * relatively to itself (as normalized value range), and then
+                 * applied directly (as normalized value range) as final value
+                 * of this synthesis chain, thus all other sources (i.e. LFOs,
+                 * EGs) should entirely be ignored.
+                 */
+                FINAL_SELF_RELATIVE = 2,
+                /**
+                 * The new synthesis parameter value of itself should be
+                 * replaced, and then applied directly (as normalized value
+                 * range) as final value of this synthesis chain, thus all other
+                 * sources (i.e. LFOs, EGs) should entirely be ignored.
+                 */
+                FINAL_NORM = 3,
+                /**
+                 * Same as @c FINAL_NORM, but this one is already in the native
+                 * unit (i.e. seconds, Hz) of this synthesis parameter.
+                 */
+                FINAL_NATIVE = 4,
+            };
             union {
                 /// Note-on and note-off event specifics
                 struct _Note {
@@ -241,17 +284,21 @@ namespace LinuxSampler {
                     note_id_t     NoteID;   ///< ID of Note whose voices shall be modified.
                     synth_param_t Type;     ///< Synthesis parameter which is to be changed.
                     float         Delta;    ///< The value change that should be applied against the note's current synthesis parameter value.
-                    bool          Relative; ///< Whether @c Delta should be applied relatively against the note's current synthesis parameter value (false means the paramter's current value is simply replaced by Delta).
                     float         AbsValue; ///< New current absolute value of synthesis parameter (that is after @c Delta being applied).
+                    ValueScope    Scope;    ///< How @c Delta should be applied against @c AbsValue, and how @c AbsValue should then actually be applied to the synthesis chain.
+
+                    inline bool isFinal() const { return Scope >= ValueScope::FINAL_SELF_RELATIVE; }
                 } NoteSynthParam;
             } Param;
             EngineChannel* pEngineChannel; ///< Pointer to the EngineChannel where this event occured on, NULL means Engine global event (e.g. SysEx message).
             MidiInputPort* pMidiInputPort; ///< Pointer to the MIDI input port on which this event occured (NOTE: currently only for global events, that is SysEx messages)
 
             inline void Init() {
+                //FIXME: probably we should memset() zero entire structure here, due to potential union initialization conflicts (see comment on ValueScope::RELATIVE)
                 Param.Note.ID = 0;
                 Param.Note.ParentNoteID = 0;
                 Param.NoteSynthParam.NoteID = 0;
+                Param.NoteSynthParam.Scope = ValueScope::RELATIVE;
             }
             inline int32_t FragmentPos() {
                 if (iFragmentPos >= 0) return iFragmentPos;
@@ -268,6 +315,17 @@ namespace LinuxSampler {
             }
             inline sched_time_t SchedTime() {
                 return pEventGenerator->schedTimeAtCurrentFragmentStart() + FragmentPos();
+            }
+            inline static ValueScope scopeBy_FinalRelativeUnit(bool bFinal, bool bRelative, bool bNativeUnit) {
+                if (!bFinal && bRelative)
+                    return ValueScope::SELF_RELATIVE;
+                if (!bFinal)
+                    return ValueScope::RELATIVE;
+                if (bRelative)
+                    return ValueScope::FINAL_SELF_RELATIVE;
+                if (bNativeUnit)
+                    return ValueScope::FINAL_NATIVE;
+                return ValueScope::FINAL_NORM;
             }
         protected:
             typedef EventGenerator::time_stamp_t time_stamp_t;

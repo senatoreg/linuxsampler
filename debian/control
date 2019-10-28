@@ -2,7 +2,7 @@ Source: linuxsampler
 Section: sound
 Priority: optional
 Maintainer: LinuxSampler Developers <linuxsampler-devel@lists.sourceforge.net>
-Build-Depends: debhelper (>= 4.0.0), libgig-dev (>= 4.1.0),
+Build-Depends: debhelper (>= 4.0.0), libgig-dev (>= 4.2.0),
                libasound2-dev | libjack-dev, dssi-dev, lv2-dev,
                libsqlite3-dev
 Standards-Version: 4.0.0
@@ -29,7 +29,7 @@ Description: realtime audio sampler
  This package also provides the LSCP shell, which can be used to control the
  sampler from the command line.
  .
- For more informations please visit http://www.linuxsampler.org
+ For more information please visit https://www.linuxsampler.org
 
 Package: liblinuxsampler-dev
 Section: libdevel
@@ -48,7 +48,7 @@ Description: realtime audio sampler (development files)
  You usually only need this package if you are compiling against
  liblinuxsampler.
  .
- For more informations please visit http://www.linuxsampler.org
+ For more information please visit https://www.linuxsampler.org
 
 Package: liblinuxsampler
 Section: libs
@@ -67,4 +67,4 @@ Description: realtime audio sampler (base library)
  that is the sampler engine together with audio and MIDI drivers. It also
  includes the DSSI and LV2 plugin binaries of the sampler.
  .
- For more informations please visit http://www.linuxsampler.org
+ For more information please visit https://www.linuxsampler.org

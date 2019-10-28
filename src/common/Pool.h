@@ -3,7 +3,7 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003, 2004 by Benno Senoner and Christian Schoenebeck   *
- *   Copyright (C) 2005 - 2017 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2019 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -39,6 +39,9 @@
 #endif // CONFIG_RT_EXCEPTIONS
 
 #include <iostream>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stddef.h>
 
 #if CONFIG_DEVMODE
 # include <string>
@@ -56,13 +59,13 @@ const std::string __err_msg_resize_while_in_use = "Pool::resizePool() ERROR: ele
  * automatically detect whether an ID became invalid, using such an ID is thus
  * safer than storing an Iterator or even a raw pointer in use case scenarios of
  * storing long term references to Pool elements.
- * 
- * This ID type is currently set (constrained) to 32-bit because the current
- * real-time instrument script infrastructure implementation, which heavily
- * relies on element IDs, is currently using 32-bit for its integer script
- * variable type.
+ *
+ * This ID type must be exactly equal to type vmint, because the latter is used
+ * by the real-time instrument script infrastructure implementation, which in
+ * turn heavily relies on element IDs, and it is using 64-bit for its integer
+ * script variable type.
  */
-typedef uint32_t pool_element_id_t;
+typedef uint64_t pool_element_id_t;
 
 // just symbol prototyping
 template<typename T> class Pool;
@@ -73,13 +76,15 @@ class RTListBase {
     protected:
         template<typename T1>
         struct _Node {
+            typedef uint64_t reincarnation_t;
+
             _Node<T1>* next;
             _Node<T1>* prev;
             T1* data;
             #if CONFIG_DEVMODE
             RTListBase<T1>* list; // list to which this node currently belongs to
             #endif // CONFIG_DEVMODE
-            uint reincarnation; // just for Pool::fromID()
+            reincarnation_t reincarnation; // just for Pool::fromID()
 
             _Node() {
                 next = NULL;
@@ -628,7 +633,7 @@ class RTList : public RTListBase<T> {
         inline Iterator allocPrepend() {
             if (pPool->poolIsEmpty()) return RTListBase<T>::end();
             Iterator element = pPool->alloc();
-            prepend(element);
+            this->prepend(element);
             #if CONFIG_DEVMODE
             element.list = this;
             #endif // CONFIG_DEVMODE
@@ -679,7 +684,7 @@ class Pool : public RTList<T> {
         Node*         nodes;
         T*            data;
         RTListBase<T> freelist; // not yet allocated elements
-        uint          poolsize;
+        size_t        poolsize;
         // following 3 used for element ID generation (and vice versa)
         uint          poolsizebits; ///< Amount of bits required to index all elements of this pool (according to current pool size).
         uint          reservedbits; ///< 3rd party reserved bits on the left side of id (default: 0).
@@ -711,13 +716,13 @@ class Pool : public RTList<T> {
          *
          * @see poolIsEmpty()
          */
-        bool poolHasFreeElements(int elements) {
+        bool poolHasFreeElements(ssize_t elements) {
             for (Iterator it = freelist.first(); it != freelist.end() && elements >= 0; ++it)
                 --elements;
             return elements <= 0;
         }
 
-        int countFreeElements() {
+        ssize_t countFreeElements() {
             return freelist.count();
         }
 
@@ -729,7 +734,7 @@ class Pool : public RTList<T> {
          *
          * @see resizePool()
          */
-        uint poolSize() const {
+        size_t poolSize() const {
             return poolsize;
         }
 
@@ -745,7 +750,7 @@ class Pool : public RTList<T> {
          *
          * @see poolSize()
          */
-        void resizePool(int Elements) {
+        void resizePool(ssize_t Elements) {
             if (freelist.count() != poolsize) {
                 #if CONFIG_DEVMODE
                 throw std::runtime_error(__err_msg_resize_while_in_use);
@@ -807,7 +812,7 @@ class Pool : public RTList<T> {
          */
         pool_element_id_t getID(const T* obj) const {
             if (!poolsize) return 0;
-            int index = int( obj - &data[0] );
+            ssize_t index = ssize_t( obj - &data[0] );
             if (index < 0 || index >= poolsize) return 0;
             return ((nodes[index].reincarnation << poolsizebits) | index) + 1;
         }
@@ -845,10 +850,10 @@ class Pool : public RTList<T> {
             if (id == 0 || id == -1) return Iterator(); // invalid iterator
             id--;
             const uint bits = poolsizebits;
-            uint index = id & ((1 << bits) - 1);
+            size_t index = id & ((1 << bits) - 1);
             if (index >= poolsize) return Iterator(); // invalid iterator
             Node* node = &nodes[index];
-            uint reincarnation = id >> bits;
+            typename Node::reincarnation_t reincarnation = id >> bits;
             if (reincarnation != node->reincarnation) return Iterator(); // invalid iterator 
             return Iterator(node);
         }
@@ -865,7 +870,7 @@ class Pool : public RTList<T> {
          */
         Iterator fromPtr(const T* obj) const {
             if (!poolsize) return Iterator(); // invalid iterator
-            int index = int( obj - &data[0] );
+            ssize_t index = ssize_t( obj - &data[0] );
             if (index < 0 || index >= poolsize) return Iterator(); // invalid iterator
             return Iterator(&nodes[index]);
         }
@@ -894,10 +899,10 @@ class Pool : public RTList<T> {
         friend class RTList<T>;
 
     private:
-        void _init(int Elements) {
+        void _init(ssize_t Elements) {
             data  = new T[Elements];
             nodes = new Node[Elements];
-            for (int i = 0; i < Elements; i++) {
+            for (ssize_t i = 0; i < Elements; i++) {
                 nodes[i].data = &data[i];
                 freelist.append(&nodes[i]);
             }
@@ -910,12 +915,12 @@ class Pool : public RTList<T> {
             reincarnationbits = sizeof(pool_element_id_t) * 8 - poolsizebits - reservedbits;
         }
 
-        inline static int bitsForSize(int size) {
+        inline static int bitsForSize(ssize_t size) {
             if (!size) return 0;
             size--;
             int bits = 0;
             for (; size > 1; bits += 2, size >>= 2);
-            return bits + size;
+            return int(bits + size);
         }
 };
 

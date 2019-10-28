@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2016 Christian Schoenebeck
+ * Copyright (c) 2014-2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -25,8 +25,19 @@
     
 struct _YYSTYPE {
     union {
-        int iValue;
+        LinuxSampler::vmint iValue;
+        LinuxSampler::vmfloat fValue;
         char* sValue;
+        struct {
+            LinuxSampler::vmint iValue;
+            LinuxSampler::MetricPrefix_t prefix[2];
+            LinuxSampler::StdUnit_t unit;
+        } iUnitValue;
+        struct {
+            LinuxSampler::vmfloat fValue;
+            LinuxSampler::MetricPrefix_t prefix[2];
+            LinuxSampler::StdUnit_t unit;
+        } fUnitValue;
     };
     LinuxSampler::EventHandlersRef nEventHandlers;
     LinuxSampler::EventHandlerRef nEventHandler;

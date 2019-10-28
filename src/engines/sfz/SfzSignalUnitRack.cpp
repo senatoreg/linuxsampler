@@ -242,8 +242,9 @@ namespace LinuxSampler { namespace sfz {
         
         float sustain = pRegion->ampeg_sustain + pRegion->ampeg_vel2sustain * velrelease;
         sustain = 10 * (sustain + GetInfluence(pRegion->ampeg_sustaincc));
-        if (pVoice->pNote)
-            sustain *= pVoice->pNote->Override.Sustain;
+        if (pVoice->pNote) {
+            pVoice->pNote->Override.Sustain.applyTo(sustain);
+        }
 
         float release = pRegion->ampeg_release + pRegion->ampeg_vel2release * velrelease;
         release = std::max(0.0f, release + GetInfluence(pRegion->ampeg_releasecc));
@@ -305,7 +306,7 @@ namespace LinuxSampler { namespace sfz {
         
         lfo.trigger (
             pLfoInfo->freq + suFreqOnCC.GetLevel(),
-            start_level_mid,
+            LFO::start_level_mid,
             1, 0, false, GetSampleRate()
         );
         lfo.updateByMIDICtrlValue(0);
@@ -335,7 +336,7 @@ namespace LinuxSampler { namespace sfz {
         
         pLFO->Trigger (
             pLfoInfo->freq + suFreqOnCC.GetLevel(),
-            start_level_mid,
+            LFO::start_level_mid,
             1, 0, false, GetSampleRate()
         );
         pLFO->Update(0);

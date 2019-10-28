@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- *   Copyright (C) 2005 - 2017 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2019 Christian Schoenebeck                       *
  *                                                                         *
  *   This library is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -30,7 +30,7 @@ namespace LinuxSampler {
      * This is a triangle Low Frequency Oscillator which uses pure integer
      * math (without branches) to synthesize the triangular wave.
      */
-    template<range_type_t RANGE>
+    template<LFO::range_type_t RANGE>
     class LFOTriangleIntMath : public LFOBase<RANGE> {
         public:
 
@@ -40,6 +40,7 @@ namespace LinuxSampler {
              * @param Max - maximum value of the output levels
              */
             LFOTriangleIntMath(float Max) : LFOBase<RANGE>::LFOBase(Max) {
+                //NOTE: DO NOT add any custom initialization here, since it would break LFOCluster construction !
             }
 
             /**
@@ -51,7 +52,7 @@ namespace LinuxSampler {
                 const int signshifts = (sizeof(int) * 8) - 1;
                 iLevel += c;
                 const int iSign  = (iLevel >> signshifts) | 1;
-                if (RANGE == range_unsigned)
+                if (RANGE == LFO::range_unsigned)
                     return normalizer * (float) (iSign * iLevel);
                 else /* signed range */
                     return normalizer * (float) (iSign * iLevel) + offset;
@@ -67,7 +68,7 @@ namespace LinuxSampler {
 
                 const unsigned int intLimit = (unsigned int) -1; // all 0xFFFF...
                 const float max = (this->InternalDepth + ExtControlValue * this->ExtControlDepthCoeff) * this->ScriptDepthFactor;
-                if (RANGE == range_unsigned) {
+                if (RANGE == LFO::range_unsigned) {
                     normalizer = max / (float) intLimit;
                 } else { // signed range
                     normalizer = max / (float) intLimit * 4.0f;
@@ -89,15 +90,17 @@ namespace LinuxSampler {
              * @param SampleRate      - current sample rate of the engines
              *                          audio output signal
              */
-            void trigger(float Frequency, start_level_t StartLevel, uint16_t InternalDepth, uint16_t ExtControlDepth, bool FlipPhase, unsigned int SampleRate) {
+            void trigger(float Frequency, LFO::start_level_t StartLevel, uint16_t InternalDepth, uint16_t ExtControlDepth, bool FlipPhase, unsigned int SampleRate) {
                 this->Frequency            = Frequency;
                 this->InternalDepth        = (InternalDepth / 1200.0f) * this->Max;
                 this->ExtControlDepthCoeff = (((float) ExtControlDepth / 1200.0f) / 127.0f) * this->Max;
                 this->ScriptFrequencyFactor = this->ScriptDepthFactor = 1.f; // reset for new voice
-                if (RANGE == range_unsigned) {
+                if (RANGE == LFO::range_unsigned) {
                     this->InternalDepth        *= 2.0f;
                     this->ExtControlDepthCoeff *= 2.0f;
                 }
+                this->pFinalDepth = NULL;
+                this->pFinalFrequency = NULL;
 
                 const unsigned int intLimit = (unsigned int) -1; // all 0xFFFF...
                 const float freq = Frequency * this->ScriptFrequencyFactor;
@@ -105,14 +108,13 @@ namespace LinuxSampler {
                 c = (int) (intLimit * r);
 
                 switch (StartLevel) {
-                    case start_level_max:
+                    case LFO::start_level_max:
                         iLevel = (FlipPhase) ? 0 : intLimit >> 1;
                         break;
-                    case start_level_mid:
-                        if (FlipPhase) c = -c; // wave should go down
-                        iLevel = intLimit >> 2;
+                    case LFO::start_level_mid:
+                        iLevel = (FlipPhase) ? intLimit / 4 * 3 : intLimit >> 2;
                         break;
-                    case start_level_min:
+                    case LFO::start_level_min:
                         iLevel = (FlipPhase) ? intLimit >> 1 : 0;
                         break;
                 }
@@ -140,13 +142,35 @@ namespace LinuxSampler {
                 c = (int) (intLimit * r);
             }
 
-            void setScriptDepthFactor(float factor) {
+            void setScriptDepthFactor(float factor, bool isFinal) {
                 this->ScriptDepthFactor = factor;
+                // set or reset this script depth parameter to be the sole
+                // source for the LFO depth
+                if (isFinal && !this->pFinalDepth)
+                    this->pFinalDepth = &this->ScriptDepthFactor;
+                else if (!isFinal && this->pFinalDepth == &this->ScriptDepthFactor)
+                    this->pFinalDepth = NULL;
+                // recalculate upon new depth
                 updateByMIDICtrlValue(this->ExtControlValue);
             }
 
             void setScriptFrequencyFactor(float factor, unsigned int SampleRate) {
                 this->ScriptFrequencyFactor = factor;
+                // in case script frequency was set as "final" value before,
+                // reset it so that all sources are processed from now on
+                if (this->pFinalFrequency == &this->ScriptFrequencyFactor)
+                    this->pFinalFrequency = NULL;
+                // recalculate upon new frequency
+                setFrequency(this->Frequency, SampleRate);
+            }
+
+            void setScriptFrequencyFinal(float hz, unsigned int SampleRate) {
+                this->ScriptFrequencyFactor = hz;
+                // assign script's given frequency as sole source for the LFO
+                // frequency, thus ignore all other sources
+                if (!this->pFinalFrequency)
+                    this->pFinalFrequency = &this->ScriptFrequencyFactor;
+                // recalculate upon new frequency
                 setFrequency(this->Frequency, SampleRate);
             }
 

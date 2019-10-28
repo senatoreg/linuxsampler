@@ -3,7 +3,7 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003, 2004 by Benno Senoner and Christian Schoenebeck   *
- *   Copyright (C) 2005 - 2010 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2019 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -90,6 +90,16 @@ namespace LinuxSampler {
                 this->data  = arg;
                 initialized = true;
                 return *this;
+            }
+
+            bool operator ==(const optional& o) const {
+                if (!initialized || !o.initialized)
+                    return initialized == o.initialized;
+                return data == o.data;
+            }
+
+            bool operator !=(const optional& o) const {
+                return !(*this == o);
             }
 
             const T& operator *() const throw (Exception) { return get(); }

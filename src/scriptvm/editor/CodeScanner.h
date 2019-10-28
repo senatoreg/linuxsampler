@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2016 Christian Schoenebeck
+ * Copyright (c) 2015-2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -49,12 +49,16 @@ protected:
 #define StringLiteralToken(s) SourceToken(SourceToken::STRING_LITERAL, s)
 #define CommentToken(s) SourceToken(SourceToken::COMMENT, s)
 #define PreprocessorToken(s) SourceToken(SourceToken::PREPROCESSOR, s)
+#define MetricPrefixToken(s) SourceToken(SourceToken::METRIC_PREFIX, s)
+#define StdUnitToken(s) SourceToken(SourceToken::STANDARD_UNIT, s)
 #define OtherToken(s) SourceToken(SourceToken::OTHER, s)
 
 // extended types
 #define IntegerVariableToken(s) SourceToken(SourceToken::INTEGER_VARIABLE, s)
+#define RealVariableToken(s) SourceToken(SourceToken::REAL_VARIABLE, s)
 #define StringVariableToken(s) SourceToken(SourceToken::STRING_VARIABLE, s)
-#define ArrayVariableToken(s) SourceToken(SourceToken::ARRAY_VARIABLE, s)
+#define IntegerArrayVariableToken(s) SourceToken(SourceToken::INTEGER_ARRAY_VARIABLE, s)
+#define RealArrayVariableToken(s) SourceToken(SourceToken::REAL_ARRAY_VARIABLE, s)
 #define EventHandlerNameToken(s) SourceToken(SourceToken::EVENT_HANDLER_NAME, s)
 
 } // namespace LinuxSampler

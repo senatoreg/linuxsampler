@@ -35,6 +35,7 @@ class MutexTest : public CppUnit::TestFixture {
 
                 ConcurrentThread();
                 int Main();
+                using Thread::SignalStartThread; // make method public
         };
 
         // dummy thread we use to check if the Mutex falsely blcoks if we do a double lock and to avoid that our unit test main thread gets blocked
@@ -44,6 +45,7 @@ class MutexTest : public CppUnit::TestFixture {
 
                 DummyThread();
                 int Main();
+                using Thread::SignalStartThread; // make method public
             private:
                 Mutex mutex;
         };

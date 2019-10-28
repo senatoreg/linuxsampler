@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 - 2017 Christian Schoenebeck
+ * Copyright (c) 2014 - 2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -27,9 +27,9 @@ namespace LinuxSampler { namespace sfz {
     public:
         InstrumentScriptVM();
         //VMFunction* functionByName(const String& name) OVERRIDE;
-        //std::map<String,VMIntRelPtr*> builtInIntVariables() OVERRIDE;
+        //std::map<String,VMIntPtr*> builtInIntVariables() OVERRIDE;
         //std::map<String,VMInt8Array*> builtInIntArrayVariables() OVERRIDE;
-        //std::map<String,int> builtInConstIntVariables() OVERRIDE;
+        //std::map<String,vmint> builtInConstIntVariables() OVERRIDE;
     };
 
 }} // namespace LinuxSampler::sfz

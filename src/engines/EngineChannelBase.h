@@ -350,7 +350,7 @@ namespace LinuxSampler {
              *                event shall be processed
              * @returns unique note ID of scheduled new note, or NULL on error
              */
-            note_id_t ScheduleNoteMicroSec(const Event* pEvent, int delay) OVERRIDE {
+            note_id_t ScheduleNoteMicroSec(const Event* pEvent, int64_t delay) OVERRIDE {
                 // add (copied) note-on event into scheduler queue
                 const event_id_t noteOnEventID = ScheduleEventMicroSec(pEvent, delay);
                 if (!noteOnEventID) return 0; // error

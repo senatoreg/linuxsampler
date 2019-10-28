@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017 Christian Schoenebeck
+ * Copyright (c) 2014-2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -19,8 +19,30 @@
 #include <vector>
 #include <map>
 #include <stddef.h> // offsetof()
+#include <functional> // std::function<>
 
 namespace LinuxSampler {
+
+    /**
+     * Native data type used by the script engine both internally, as well as
+     * for all integer data types used by scripts (i.e. for all $foo variables
+     * in NKSP scripts). Note that this is different from the original KSP which
+     * is limited to 32 bit for integer variables in KSP scripts.
+     */
+    typedef int64_t vmint;
+
+    /**
+     * Native data type used internally by the script engine for all unsigned
+     * integer types. This type is currently not exposed to scripts.
+     */
+    typedef uint64_t vmuint;
+
+    /**
+     * Native data type used by the script engine both internally for floating
+     * point data, as well as for all @c real data types used by scripts (i.e.
+     * for all ~foo variables in NKSP scripts).
+     */
+    typedef float vmfloat;
 
     /**
      * Identifies the type of a noteworthy issue identified by the script
@@ -44,6 +66,8 @@ namespace LinuxSampler {
         INT_ARR_EXPR, ///< integer array expression
         STRING_EXPR, ///< string expression
         STRING_ARR_EXPR, ///< string array expression
+        REAL_EXPR, ///< floating point (scalar) expression
+        REAL_ARR_EXPR, ///< floating point array expression
     };
 
     /** @brief Result flags of a script statement or script function call.
@@ -81,20 +105,184 @@ namespace LinuxSampler {
      *
      * Identifies one of the possible event handler callback types defined by
      * the NKSP script language.
+     *
+     * IMPORTANT: this type is forced to be emitted as int32_t type ATM, because
+     * that's the native size expected by the built-in instrument script
+     * variable bindings (see occurrences of VMInt32RelPtr and DECLARE_VMINT
+     * respectively. A native type mismatch between the two could lead to
+     * undefined behavior! Background: By definition the C/C++ compiler is free
+     * to choose a bit size for individual enums which it might find
+     * appropriate, which is usually decided by the compiler according to the
+     * biggest enum constant value defined (in practice it is usually 32 bit).
      */
-    enum VMEventHandlerType_t {
+    enum VMEventHandlerType_t : int32_t {
         VM_EVENT_HANDLER_INIT, ///< Initilization event handler, that is script's "on init ... end on" code block.
         VM_EVENT_HANDLER_NOTE, ///< Note event handler, that is script's "on note ... end on" code block.
         VM_EVENT_HANDLER_RELEASE, ///< Release event handler, that is script's "on release ... end on" code block.
         VM_EVENT_HANDLER_CONTROLLER, ///< Controller event handler, that is script's "on controller ... end on" code block.
     };
 
+    /**
+     * All metric unit prefixes (actually just scale factors) supported by this
+     * script engine.
+     */
+    enum MetricPrefix_t {
+        VM_NO_PREFIX = 0, ///< = 1
+        VM_KILO,          ///< = 10^3, short 'k'
+        VM_HECTO,         ///< = 10^2, short 'h'
+        VM_DECA,          ///< = 10, short 'da'
+        VM_DECI,          ///< = 10^-1, short 'd'
+        VM_CENTI,         ///< = 10^-2, short 'c' (this is also used for tuning "cents")
+        VM_MILLI,         ///< = 10^-3, short 'm'
+        VM_MICRO,         ///< = 10^-6, short 'u'
+    };
+
+    /**
+     * This constant is used for comparison with Unit::unitFactor() to check
+     * whether a number does have any metric unit prefix at all.
+     *
+     * @see Unit::unitFactor()
+     */
+    static const vmfloat VM_NO_FACTOR = vmfloat(1);
+
+    /**
+     * All measurement unit types supported by this script engine.
+     *
+     * @e Note: there is no standard unit "cents" here (for pitch/tuning), use
+     * @c VM_CENTI for the latter instad. That's because the commonly cited
+     * "cents" unit is actually no measurement unit type but rather a metric
+     * unit prefix.
+     *
+     * @see MetricPrefix_t
+     */
+    enum StdUnit_t {
+        VM_NO_UNIT = 0, ///< No unit used, the number is just an abstract number.
+        VM_SECOND,      ///< Measuring time.
+        VM_HERTZ,       ///< Measuring frequency.
+        VM_BEL,         ///< Measuring relation between two energy levels (in logarithmic scale). Since we are using it for accoustics, we are always referring to A-weighted Bels (i.e. dBA).
+    };
+
+    //TODO: see Unit::hasUnitFactorEver()
+    enum EverTriState_t {
+        VM_NEVER = 0,
+        VM_MAYBE,
+        VM_ALWAYS,
+    };
+
     // just symbol prototyping
     class VMIntExpr;
+    class VMRealExpr;
     class VMStringExpr;
+    class VMNumberExpr;
+    class VMArrayExpr;
     class VMIntArrayExpr;
+    class VMRealArrayExpr;
     class VMStringArrayExpr;
     class VMParserContext;
+
+    /** @brief Virtual machine standard measuring unit.
+     *
+     * Abstract base class representing standard measurement units throughout
+     * the script engine. These might be e.g. "dB" (deci Bel) for loudness,
+     * "Hz" (Hertz) for frequencies or "s" for "seconds". These unit types can
+     * combined with metric prefixes, for instance "kHz" (kilo Hertz),
+     * "us" (micro second), etc.
+     *
+     * Originally the script engine only supported abstract integer values for
+     * controlling any synthesis parameter or built-in function argument or
+     * variable. Under certain situations it makes sense though for an
+     * instrument script author to provide values in real, standard measurement
+     * units to provide a more natural and intuitive approach for writing
+     * instrument scripts, for example by setting the frequency of some LFO
+     * directly to "20Hz" or reducing loudness by "-4.2dB". Hence support for
+     * standard units in scripts was added as an extension to the NKSP script
+     * engine.
+     *
+     * So a unit consists of 1) a sequence of metric prefixes as scale factor
+     * (e.g. "k" for kilo) and 2) the actual unit type (e.g. "Hz" for Hertz).
+     * The unit type is a constant feature of number literals and variables, so
+     * once a variable was declared with a unit type (or no unit type at all)
+     * then that unit type of that variable cannot be changed for the entire
+     * life time of the script. This is different from the unit's metric
+     * prefix(es) of variables which may freely be changed at runtime.
+     */
+    class VMUnit {
+    public:
+        /**
+         * Returns the metric prefix(es) of this unit as unit factor. A metric
+         * prefix essentially is just a mathematical scale factor that should be
+         * applied to the number associated with the measurement unit. Consider
+         * a string literal in an NKSP script like '3kHz' where 'k' (kilo) is
+         * the metric prefix, which essentically is a scale factor of 1000.
+         *
+         * Usually a unit either has exactly none or one metric prefix, but note
+         * that there might also be units with more than one prefix, for example
+         * @c mdB (milli deci Bel) is used sometimes which has two prefixes. The
+         * latter is an exception though and more than two prefixes is currently
+         * not supported by the script engine.
+         *
+         * The factor returned by this method is the final mathematical factor
+         * that should be multiplied against the number associated with this
+         * unit. This factor results from the sequence of metric prefixes of
+         * this unit.
+         *
+         * @see MetricPrefix_t, hasUnitFactorNow(), hasUnitFactorEver(),
+         *      VM_NO_FACTOR
+         * @returns current metric unit factor
+         */
+        virtual vmfloat unitFactor() const = 0;
+
+        //TODO: this still needs to be implemented in tree.h/.pp, built-in functions and as 2nd pass of parser appropriately
+        /*virtual*/ EverTriState_t hasUnitFactorEver() const { return VM_NEVER; }
+
+        /**
+         * Whether this unit currently does have any metric unit prefix.
+         *
+         * This is actually just a convenience method which returns @c true if
+         * unitFactor() is not @c 1.0.
+         *
+         * @see MetricPrefix_t, unitFactor(), hasUnitFactorEver(), VM_NO_FACTOR
+         * @returns @c true if this unit currently has any metric prefix
+         */
+        bool hasUnitFactorNow() const;
+
+        /**
+         * This is the actual fundamental measuring unit base type of this unit,
+         * which might be either Hertz, second or Bel.
+         *
+         * Note that a number without a unit type may still have metric
+         * prefixes.
+         *
+         * @returns standard unit type identifier or VM_NO_UNIT if no unit type
+         *          is used for this object
+         */
+        virtual StdUnit_t unitType() const = 0;
+
+        /**
+         * Returns the actual mathematical factor represented by the passed
+         * @a prefix argument.
+         */
+        static vmfloat unitFactor(MetricPrefix_t prefix);
+
+        /**
+         * Returns the actual mathematical factor represented by the passed
+         * two @a prefix1 and @a prefix2 arguments.
+         *
+         * @returns scale factor of given metric unit prefixes
+         */
+        static vmfloat unitFactor(MetricPrefix_t prefix1, MetricPrefix_t prefix2);
+
+        /**
+         * Returns the actual mathematical factor represented by the passed
+         * @a prefixes array. The passed array should always be terminated by a
+         * VM_NO_PREFIX value as last element.
+         *
+         * @param prefixes - sequence of metric prefixes
+         * @param size - max. amount of elements of array @a prefixes
+         * @returns scale factor of given metric unit prefixes
+         */
+        static vmfloat unitFactor(const MetricPrefix_t* prefixes, vmuint size = 2);
+    };
 
     /** @brief Virtual machine expression
      *
@@ -127,11 +315,48 @@ namespace LinuxSampler {
          * if this expression is i.e. actually a string expression like "12",
          * calling asInt() will @b not cast that numerical string expression to
          * an integer expression 12 for you, instead this method will simply
-         * return NULL!
+         * return NULL! Same applies if this expression is actually a real
+         * number expression: asInt() would return NULL in that case as well.
          *
-         * @see exprType()
+         * @see exprType(), asReal(), asNumber()
          */
         VMIntExpr* asInt() const;
+
+        /**
+         * In case this expression is a real number (floating point) expression,
+         * then this method returns a casted pointer to that VMRealExpr object.
+         * It returns NULL if this expression is not a real number expression.
+         *
+         * @b Note: type casting performed by this method is strict! That means
+         * if this expression is i.e. actually a string expression like "12",
+         * calling asReal() will @b not cast that numerical string expression to
+         * a real number expression 12.0 for you, instead this method will
+         * simply return NULL! Same applies if this expression is actually an
+         * integer expression: asReal() would return NULL in that case as well.
+         *
+         * @see exprType(), asInt(), asNumber()
+         */
+        VMRealExpr* asReal() const;
+
+        /**
+         * In case this expression is a scalar number expression, that is either
+         * an integer (scalar) expression or a real number (floating point
+         * scalar) expression, then this method returns a casted pointer to that
+         * VMNumberExpr base class object. It returns NULL if this
+         * expression is neither an integer (scalar), nor a real number (scalar)
+         * expression.
+         *
+         * Since the methods asInt() and asReal() are very strict, this method
+         * is provided as convenience access in case only very general
+         * information (e.g. which standard measurement unit is being used or
+         * whether final operator being effective to this expression) is
+         * intended to be retrieved of this scalar number expression independent
+         * from whether this expression is actually an integer or a real number
+         * expression.
+         *
+         * @see exprType(), asInt(), asReal()
+         */
+        VMNumberExpr* asNumber() const;
 
         /**
          * In case this expression is a string expression, then this method
@@ -154,10 +379,10 @@ namespace LinuxSampler {
          * returns NULL if this expression is not an integer array expression.
          *
          * @b Note: type casting performed by this method is strict! That means
-         * if this expression is i.e. an integer expression or a string
-         * expression, calling asIntArray() will @b not cast those scalar
-         * expressions to an array expression for you, instead this method will
-         * simply return NULL!
+         * if this expression is i.e. an integer scalar expression, a real
+         * number expression or a string expression, calling asIntArray() will
+         * @b not cast those expressions to an integer array expression for you,
+         * instead this method will simply return NULL!
          *
          * @b Note: this method is currently, and in contrast to its other
          * counter parts, declared as virtual method. Some deriving classes are
@@ -170,6 +395,47 @@ namespace LinuxSampler {
          * @see exprType()
          */
         virtual VMIntArrayExpr* asIntArray() const;
+
+        /**
+         * In case this expression is a real number (floating point) array
+         * expression, then this method returns a casted pointer to that
+         * VMRealArrayExpr object. It returns NULL if this expression is not a
+         * real number array expression.
+         *
+         * @b Note: type casting performed by this method is strict! That means
+         * if this expression is i.e. a real number scalar expression, an
+         * integer expression or a string expression, calling asRealArray() will
+         * @b not cast those scalar expressions to a real number array
+         * expression for you, instead this method will simply return NULL!
+         *
+         * @b Note: this method is currently, and in contrast to its other
+         * counter parts, declared as virtual method. Some deriving classes are
+         * currently using this to override this default implementation in order
+         * to implement an "evaluate now as real number array" behavior. This
+         * has efficiency reasons, however this also currently makes this part
+         * of the API less clean and should thus be addressed in future with
+         * appropriate changes to the API.
+         *
+         * @see exprType()
+         */
+        virtual VMRealArrayExpr* asRealArray() const;
+
+        /**
+         * This is an alternative to calling either asIntArray() or
+         * asRealArray(). This method here might be used if the fundamental
+         * scalar data type (real or integer) of the array is not relevant,
+         * i.e. for just getting the size of the array. Since all as*() methods
+         * here are very strict regarding type casting, this asArray() method
+         * sometimes can reduce code complexity.
+         *
+         * Likewise calling this method only returns a valid pointer if the
+         * expression is some array type (currently either integer array or real
+         * number array). For any other expression type this method will return
+         * NULL instead.
+         *
+         * @see exprType()
+         */
+        VMArrayExpr* asArray() const;
 
         /**
          * Returns true in case this expression can be considered to be a
@@ -202,6 +468,110 @@ namespace LinuxSampler {
         bool isModifyable() const;
     };
 
+    /** @brief Virtual machine scalar number expression
+     *
+     * This is the abstract base class for integer (scalar) expressions and
+     * real number (floating point scalar) expressions of scripts.
+     */
+    class VMNumberExpr : virtual public VMExpr, virtual public VMUnit {
+    public:
+        /**
+         * Returns @c true if the value of this expression should be applied
+         * as final value to the respective destination synthesis chain
+         * parameter.
+         *
+         * This property is somewhat special and dedicated for the purpose of
+         * this expression's (integer or real number) value to be applied as
+         * parameter to the synthesis chain of the sampler (i.e. for altering a
+         * filter cutoff frequency). Now historically and by default all values
+         * of scripts are applied relatively to the sampler's synthesis chain,
+         * that is the synthesis parameter value of a script is multiplied
+         * against other sources for the same synthesis parameter (i.e. an LFO
+         * or a dedicated MIDI controller either hard wired in the engine or
+         * defined by the instrument patch). So by default the resulting actual
+         * final synthesis parameter is a combination of all these sources. This
+         * has the advantage that it creates a very living and dynamic overall
+         * sound.
+         *
+         * However sometimes there are requirements by script authors where this
+         * is not what you want. Therefore the NKSP script engine added a
+         * language extension by prefixing a value in scripts with a @c !
+         * character the value will be defined as being the "final" value of the
+         * destination synthesis parameter, so that causes this value to be
+         * applied exclusively, and the values of all other sources are thus
+         * entirely ignored by the sampler's synthesis core as long as this
+         * value is assigned by the script engine as "final" value for the
+         * requested synthesis parameter.
+         */
+        virtual bool isFinal() const = 0;
+
+        /**
+         * Calling this method evaluates the expression and returns the value
+         * of the expression as integer. If this scalar number expression is a
+         * real number expression then this method automatically casts the value
+         * from real number to integer.
+         */
+        vmint evalCastInt();
+
+        /**
+         * Calling this method evaluates the expression and returns the value
+         * of the expression as integer and thus behaves similar to the previous
+         * method, however this overridden method automatically takes unit
+         * prefixes into account and returns a converted value corresponding to
+         * the given unit @a prefix expected by the caller.
+         *
+         * Example: Assume this expression was an integer expression '12kHz'
+         * then calling this method as @c evalCastInt(VM_MILLI) would return
+         * the value @c 12000000.
+         *
+         * @param prefix - measuring unit prefix expected for result by caller
+         */
+        vmint evalCastInt(MetricPrefix_t prefix);
+
+        /**
+         * This method behaves like the previous method, just that it takes a
+         * measuring unit prefix with two elements (e.g. "milli cents" for
+         * tuning).
+         *
+         * @param prefix1 - 1st measuring unit prefix element expected by caller
+         * @param prefix2 - 2nd measuring unit prefix element expected by caller
+         */
+        vmint evalCastInt(MetricPrefix_t prefix1, MetricPrefix_t prefix2);
+
+        /**
+         * Calling this method evaluates the expression and returns the value
+         * of the expression as real number. If this scalar number expression is
+         * an integer expression then this method automatically casts the value
+         * from integer to real number.
+         */
+        vmfloat evalCastReal();
+
+        /**
+         * Calling this method evaluates the expression and returns the value
+         * of the expression as real number and thus behaves similar to the
+         * previous method, however this overridden method automatically takes
+         * unit prefixes into account and returns a converted value
+         * corresponding to the given unit @a prefix expected by the caller.
+         *
+         * Example: Assume this expression was an integer expression '8ms' then
+         * calling this method as @c evalCastReal(VM_NO_PREFIX) would return the
+         * value @c 0.008.
+         *
+         * @param prefix - measuring unit prefix expected for result by caller
+         */
+        vmfloat evalCastReal(MetricPrefix_t prefix);
+
+        /**
+         * This method behaves like the previous method, just that it takes a
+         * measuring unit prefix with two elements (e.g. "milli cents" for
+         * tuning).
+         *
+         * @param prefix1 - 1st measuring unit prefix element expected by caller
+         * @param prefix2 - 2nd measuring unit prefix element expected by caller
+         */
+        vmfloat evalCastReal(MetricPrefix_t prefix1, MetricPrefix_t prefix2);
+    };
+
     /** @brief Virtual machine integer expression
      *
      * This is the abstract base class for all expressions inside scripts which
@@ -209,18 +579,75 @@ namespace LinuxSampler {
      * abstract method evalInt() to return the actual integer result value of
      * the expression.
      */
-    class VMIntExpr : virtual public VMExpr {
+    class VMIntExpr : virtual public VMNumberExpr {
     public:
         /**
          * Returns the result of this expression as integer (scalar) value.
          * This abstract method must be implemented by deriving classes.
          */
-        virtual int evalInt() = 0;
+        virtual vmint evalInt() = 0;
+
+        /**
+         * Returns the result of this expression as integer (scalar) value and
+         * thus behaves similar to the previous method, however this overridden
+         * method automatically takes unit prefixes into account and returns a
+         * value corresponding to the expected given unit @a prefix.
+         *
+         * @param prefix - default measurement unit prefix expected by caller
+         */
+        vmint evalInt(MetricPrefix_t prefix);
+
+        /**
+         * This method behaves like the previous method, just that it takes
+         * a default measurement prefix with two elements (i.e. "milli cents"
+         * for tuning).
+         */
+        vmint evalInt(MetricPrefix_t prefix1, MetricPrefix_t prefix2);
 
         /**
          * Returns always INT_EXPR for instances of this class.
          */
         ExprType_t exprType() const OVERRIDE { return INT_EXPR; }
+    };
+
+    /** @brief Virtual machine real number (floating point scalar) expression
+     *
+     * This is the abstract base class for all expressions inside scripts which
+     * evaluate to a real number (floating point scalar) value. Deriving classes
+     * implement the abstract method evalReal() to return the actual floating
+     * point result value of the expression.
+     */
+    class VMRealExpr : virtual public VMNumberExpr {
+    public:
+        /**
+         * Returns the result of this expression as real number (floating point
+         * scalar) value. This abstract method must be implemented by deriving
+         * classes.
+         */
+        virtual vmfloat evalReal() = 0;
+
+        /**
+         * Returns the result of this expression as real number (floating point
+         * scalar) value and thus behaves similar to the previous method,
+         * however this overridden method automatically takes unit prefixes into
+         * account and returns a value corresponding to the expected given unit
+         * @a prefix.
+         *
+         * @param prefix - default measurement unit prefix expected by caller
+         */
+        vmfloat evalReal(MetricPrefix_t prefix);
+
+        /**
+         * This method behaves like the previous method, just that it takes
+         * a default measurement prefix with two elements (i.e. "milli cents"
+         * for tuning).
+         */
+        vmfloat evalReal(MetricPrefix_t prefix1, MetricPrefix_t prefix2);
+
+        /**
+         * Returns always REAL_EXPR for instances of this class.
+         */
+        ExprType_t exprType() const OVERRIDE { return REAL_EXPR; }
     };
 
     /** @brief Virtual machine string expression
@@ -257,7 +684,33 @@ namespace LinuxSampler {
          * Returns amount of elements in this array. This abstract method must
          * be implemented by deriving classes.
          */
-        virtual int arraySize() const = 0;
+        virtual vmint arraySize() const = 0;
+    };
+
+    /** @brief Virtual Machine Number Array Expression
+     *
+     * This is the abstract base class for all expressions which either evaluate
+     * to an integer array or real number array.
+     */
+    class VMNumberArrayExpr : virtual public VMArrayExpr {
+    public:
+        /**
+         * Returns the metric unit factor of the requested array element.
+         *
+         * @param i - array element index (must be between 0 .. arraySize() - 1)
+         * @see VMUnit::unitFactor() for details about metric unit factors
+         */
+        virtual vmfloat unitFactorOfElement(vmuint i) const = 0;
+
+        /**
+         * Changes the current unit factor of the array element given by element
+         * index @a i.
+         *
+         * @param i - array element index (must be between 0 .. arraySize() - 1)
+         * @param factor - new unit factor to be assigned
+         * @see VMUnit::unitFactor() for details about metric unit factors
+         */
+        virtual void assignElementUnitFactor(vmuint i, vmfloat factor) = 0;
     };
 
     /** @brief Virtual Machine Integer Array Expression
@@ -267,7 +720,7 @@ namespace LinuxSampler {
      * abstract methods arraySize(), evalIntElement() and assignIntElement() to
      * access the individual integer array values.
      */
-    class VMIntArrayExpr : virtual public VMArrayExpr {
+    class VMIntArrayExpr : virtual public VMNumberArrayExpr {
     public:
         /**
          * Returns the (scalar) integer value of the array element given by
@@ -275,7 +728,7 @@ namespace LinuxSampler {
          *
          * @param i - array element index (must be between 0 .. arraySize() - 1)
          */
-        virtual int evalIntElement(uint i) = 0;
+        virtual vmint evalIntElement(vmuint i) = 0;
 
         /**
          * Changes the current value of an element (given by array element
@@ -284,12 +737,44 @@ namespace LinuxSampler {
          * @param i - array element index (must be between 0 .. arraySize() - 1)
          * @param value - new integer scalar value to be assigned to that array element
          */
-        virtual void assignIntElement(uint i, int value) = 0;
+        virtual void assignIntElement(vmuint i, vmint value) = 0;
 
         /**
          * Returns always INT_ARR_EXPR for instances of this class.
          */
         ExprType_t exprType() const OVERRIDE { return INT_ARR_EXPR; }
+    };
+
+    /** @brief Virtual Machine Real Number Array Expression
+     *
+     * This is the abstract base class for all expressions inside scripts which
+     * evaluate to an array of real numbers (floating point values). Deriving
+     * classes implement the abstract methods arraySize(), evalRealElement() and
+     * assignRealElement() to access the array's individual real numbers.
+     */
+    class VMRealArrayExpr : virtual public VMNumberArrayExpr {
+    public:
+        /**
+         * Returns the (scalar) real mumber (floating point value) of the array
+         * element given by element index @a i.
+         *
+         * @param i - array element index (must be between 0 .. arraySize() - 1)
+         */
+        virtual vmfloat evalRealElement(vmuint i) = 0;
+
+        /**
+         * Changes the current value of an element (given by array element
+         * index @a i) of this real number array.
+         *
+         * @param i - array element index (must be between 0 .. arraySize() - 1)
+         * @param value - new real number value to be assigned to that array element
+         */
+        virtual void assignRealElement(vmuint i, vmfloat value) = 0;
+
+        /**
+         * Returns always REAL_ARR_EXPR for instances of this class.
+         */
+        ExprType_t exprType() const OVERRIDE { return REAL_ARR_EXPR; }
     };
 
     /** @brief Arguments (parameters) for being passed to a built-in script function.
@@ -306,7 +791,7 @@ namespace LinuxSampler {
          * Returns the amount of arguments going to be passed to the script
          * function.
          */
-        virtual int argsCount() const = 0;
+        virtual vmint argsCount() const = 0;
 
         /**
          * Returns the respective argument (requested by argument index @a i) of
@@ -315,8 +800,9 @@ namespace LinuxSampler {
          * argument passed to the function at runtime.
          *
          * @param i - function argument index (indexed from left to right)
+         * @return requested function argument or NULL if @a i out of bounds
          */
-        virtual VMExpr* arg(int i) = 0;
+        virtual VMExpr* arg(vmint i) = 0;
     };
 
     /** @brief Result value returned from a call to a built-in script function.
@@ -372,47 +858,79 @@ namespace LinuxSampler {
         /**
          * Script data type of the function's return value. If the function does
          * not return any value (void), then it returns EMPTY_EXPR here.
+         *
+         * Some functions may have a different return type depending on the
+         * arguments to be passed to this function. That's what the @a args
+         * parameter is for, so that the method implementation can look ahead
+         * of what kind of parameters are going to be passed to the built-in
+         * function later on in order to decide which return value type would
+         * be used and returned by the function accordingly in that case.
+         *
+         * @param args - function arguments going to be passed for executing
+         *               this built-in function later on
          */
-        virtual ExprType_t returnType() = 0;
+        virtual ExprType_t returnType(VMFnArgs* args) = 0;
+
+        /**
+         * Standard measuring unit type of the function's result value
+         * (e.g. second, Hertz).
+         *
+         * Some functions may have a different standard measuring unit type for
+         * their return value depending on the arguments to be passed to this
+         * function. That's what the @a args parameter is for, so that the
+         * method implementation can look ahead of what kind of parameters are
+         * going to be passed to the built-in function later on in order to
+         * decide which return value type would be used and returned by the
+         * function accordingly in that case.
+         *
+         * @param args - function arguments going to be passed for executing
+         *               this built-in function later on
+         * @see Unit for details about standard measuring units
+         */
+        virtual StdUnit_t returnUnitType(VMFnArgs* args) = 0;
+
+        /**
+         * Whether the result value returned by this built-in function is
+         * considered to be a 'final' value.
+         *
+         * Some functions may have a different 'final' feature for their return
+         * value depending on the arguments to be passed to this function.
+         * That's what the @a args parameter is for, so that the method
+         * implementation can look ahead of what kind of parameters are going to
+         * be passed to the built-in function later on in order to decide which
+         * return value type would be used and returned by the function
+         * accordingly in that case.
+         *
+         * @param args - function arguments going to be passed for executing
+         *               this built-in function later on
+         * @see VMNumberExpr::isFinal() for details about 'final' values
+         */
+        virtual bool returnsFinal(VMFnArgs* args) = 0;
 
         /**
          * Minimum amount of function arguments this function accepts. If a
          * script is calling this function with less arguments, the script
          * parser will throw a parser error.
          */
-        virtual int minRequiredArgs() const = 0;
+        virtual vmint minRequiredArgs() const = 0;
 
         /**
          * Maximum amount of function arguments this functions accepts. If a
          * script is calling this function with more arguments, the script
          * parser will throw a parser error.
          */
-        virtual int maxAllowedArgs() const = 0;
-
-        /**
-         * Script data type of the function's @c iArg 'th function argument.
-         * The information provided here is less strong than acceptsArgType().
-         * The parser will compare argument data types provided in scripts by
-         * calling acceptsArgType(). The return value of argType() is used by the
-         * parser instead to show an appropriate parser error which data type
-         * this function usually expects as "default" data type. Reason: a
-         * function may accept multiple data types for a certain function
-         * argument and would automatically cast the passed argument value in
-         * that case to the type it actually needs.
-         *
-         * @param iArg - index of the function argument in question
-         *               (must be between 0 .. maxAllowedArgs() - 1)
-         */
-        virtual ExprType_t argType(int iArg) const = 0;
+        virtual vmint maxAllowedArgs() const = 0;
 
         /**
          * This method is called by the parser to check whether arguments
          * passed in scripts to this function are accepted by this function. If
          * a script calls this function with an argument's data type not
-         * accepted by this function, the parser will throw a parser error. On
-         * such errors the data type returned by argType() will be used to
-         * assemble an appropriate error message regarding the precise misusage
-         * of the built-in function.
+         * accepted by this function, the parser will throw a parser error.
+         *
+         * The parser will also use this method to assemble a list of actually
+         * supported data types accepted by this built-in function for the
+         * function argument in question, that is to provide an appropriate and
+         * precise parser error message in such cases.
          *
          * @param iArg - index of the function argument in question
          *               (must be between 0 .. maxAllowedArgs() - 1)
@@ -421,7 +939,71 @@ namespace LinuxSampler {
          * @return true if the given data type would be accepted for the
          *         respective function argument by the function
          */
-        virtual bool acceptsArgType(int iArg, ExprType_t type) const = 0;
+        virtual bool acceptsArgType(vmint iArg, ExprType_t type) const = 0;
+
+        /**
+         * This method is called by the parser to check whether arguments
+         * passed in scripts to this function are accepted by this function. If
+         * a script calls this function with an argument's measuremnt unit type
+         * not accepted by this function, the parser will throw a parser error.
+         *
+         * This default implementation of this method does not accept any
+         * measurement unit. Deriving subclasses would override this method
+         * implementation in case they do accept any measurement unit for its
+         * function arguments.
+         *
+         * @param iArg - index of the function argument in question
+         *               (must be between 0 .. maxAllowedArgs() - 1)
+         * @param type - standard measurement unit data type used for this
+         *               function argument by currently parsed script
+         * @return true if the given standard measurement unit type would be
+         *         accepted for the respective function argument by the function
+         */
+        virtual bool acceptsArgUnitType(vmint iArg, StdUnit_t type) const;
+
+        /**
+         * This method is called by the parser to check whether arguments
+         * passed in scripts to this function are accepted by this function. If
+         * a script calls this function with a metric unit prefix and metric
+         * prefixes are not accepted for that argument by this function, then
+         * the parser will throw a parser error.
+         *
+         * This default implementation of this method does not accept any
+         * metric prefix. Deriving subclasses would override this method
+         * implementation in case they do accept any metric prefix for its
+         * function arguments.
+         *
+         * @param iArg - index of the function argument in question
+         *               (must be between 0 .. maxAllowedArgs() - 1)
+         * @param type - standard measurement unit data type used for that
+         *               function argument by currently parsed script
+         *
+         * @return true if a metric prefix would be accepted for the respective
+         *         function argument by this function
+         *
+         * @see MetricPrefix_t
+         */
+        virtual bool acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const;
+
+        /**
+         * This method is called by the parser to check whether arguments
+         * passed in scripts to this function are accepted by this function. If
+         * a script calls this function with an argument that is declared to be
+         * a "final" value and this is not accepted by this function, the parser
+         * will throw a parser error.
+         *
+         * This default implementation of this method does not accept a "final"
+         * value. Deriving subclasses would override this method implementation
+         * in case they do accept a "final" value for its function arguments.
+         *
+         * @param iArg - index of the function argument in question
+         *               (must be between 0 .. maxAllowedArgs() - 1)
+         * @return true if a "final" value would be accepted for the respective
+         *         function argument by the function
+         *
+         * @see VMNumberExpr::isFinal(), returnsFinal()
+         */
+        virtual bool acceptsArgFinal(vmint iArg) const;
 
         /**
          * This method is called by the parser to check whether some arguments
@@ -436,7 +1018,42 @@ namespace LinuxSampler {
          * @param iArg - index of the function argument in question
          *               (must be between 0 .. maxAllowedArgs() - 1)
          */
-        virtual bool modifiesArg(int iArg) const = 0;
+        virtual bool modifiesArg(vmint iArg) const = 0;
+
+        /** @brief Parse-time check of function arguments.
+         *
+         * This method is called by the parser to let the built-in function
+         * perform its own, individual parse time checks on the arguments to be
+         * passed to the built-in function. So this method is the place for
+         * implementing custom checks which are very specific to the individual
+         * built-in function's purpose and its individual requirements.
+         *
+         * For instance the built-in 'in_range()' function uses this method to
+         * check whether the last 2 of their 3 arguments are of same data type
+         * and if not it triggers a parser error. 'in_range()' also checks
+         * whether all of its 3 arguments do have the same standard measuring
+         * unit type and likewise raises a parser error if not.
+         *
+         * For less critical issues built-in functions may also raise parser
+         * warnings instead.
+         *
+         * It is recommended that classes implementing (that is overriding) this
+         * method should always call their super class's implementation of this
+         * method to ensure their potential parse time checks are always
+         * performed as well.
+         *
+         * @param args - function arguments going to be passed for executing
+         *               this built-in function later on
+         * @param err - the parser's error handler to be called by this method
+         *              implementation to trigger a parser error with the
+         *              respective error message text
+         * @param wrn - the parser's warning handler to be called by this method
+         *              implementation to trigger a parser warning with the
+         *              respective warning message text
+         */
+        virtual void checkArgs(VMFnArgs* args,
+                               std::function<void(String)> err,
+                               std::function<void(String)> wrn);
 
         /**
          * Implements the actual function execution. This exec() method is
@@ -470,25 +1087,43 @@ namespace LinuxSampler {
 
     /** @brief Virtual machine relative pointer.
      *
-     * POD base of VMIntRelPtr and VMInt8RelPtr structures. Not intended to be
-     * used directly. Use VMIntRelPtr or VMInt8RelPtr instead.
+     * POD base of VMInt64RelPtr, VMInt32RelPtr and VMInt8RelPtr structures. Not
+     * intended to be used directly. Use VMInt64RelPtr, VMInt32RelPtr,
+     * VMInt8RelPtr instead.
      *
-     * @see VMIntRelPtr, VMInt8RelPtr
+     * @see VMInt64RelPtr, VMInt32RelPtr, VMInt8RelPtr
      */
     struct VMRelPtr {
         void** base; ///< Base pointer.
-        int offset;  ///< Offset (in bytes) relative to base pointer.
+        vmint offset;  ///< Offset (in bytes) relative to base pointer.
         bool readonly; ///< Whether the pointed data may be modified or just be read.
     };
 
-    /** @brief Pointer to built-in VM integer variable (of C/C++ type int).
+    /** @brief Pointer to built-in VM integer variable (interface class).
      *
-     * Used for defining built-in 32 bit integer script variables.
+     * This class acts as an abstract interface to all built-in integer script
+     * variables, independent of their actual native size (i.e. some built-in
+     * script variables are internally using a native int size of 64 bit or 32
+     * bit or 8 bit). The virtual machine is using this interface class instead
+     * of its implementing descendants (VMInt64RelPtr, VMInt32RelPtr,
+     * VMInt8RelPtr) in order for the virtual machine for not being required to
+     * handle each of them differently.
+     */
+    struct VMIntPtr {
+        virtual vmint evalInt() = 0;
+        virtual void assign(vmint i) = 0;
+        virtual bool isAssignable() const = 0;
+    };
+
+    /** @brief Pointer to built-in VM integer variable (of C/C++ type int64_t).
+     *
+     * Used for defining built-in 64 bit integer script variables.
      *
      * @b CAUTION: You may only use this class for pointing to C/C++ variables
-     * of type "int" (which on most systems is 32 bit in size). If the C/C++ int
-     * variable you want to reference is only 8 bit in size, then you @b must
-     * use VMInt8RelPtr instead!
+     * of type "int64_t" (thus being exactly 64 bit in size). If the C/C++ int
+     * variable you want to reference is only 32 bit in size then you @b must
+     * use VMInt32RelPtr instead! Respectively for a referenced native variable
+     * with only 8 bit in size you @b must use VMInt8RelPtr instead!
      *
      * For efficiency reasons the actual native C/C++ int variable is referenced
      * by two components here. The actual native int C/C++ variable in memory
@@ -500,21 +1135,68 @@ namespace LinuxSampler {
      *
      * Refer to DECLARE_VMINT() for example code.
      *
-     * @see VMInt8RelPtr, DECLARE_VMINT()
+     * @see VMInt32RelPtr, VMInt8RelPtr, DECLARE_VMINT()
      */
-    struct VMIntRelPtr : VMRelPtr {
-        VMIntRelPtr() {
+    struct VMInt64RelPtr : VMRelPtr, VMIntPtr {
+        VMInt64RelPtr() {
             base   = NULL;
             offset = 0;
             readonly = false;
         }
-        VMIntRelPtr(const VMRelPtr& data) {
+        VMInt64RelPtr(const VMRelPtr& data) {
             base   = data.base;
             offset = data.offset;
             readonly = false;
         }
-        virtual int evalInt() { return *(int*)&(*(uint8_t**)base)[offset]; }
-        virtual void assign(int i) { *(int*)&(*(uint8_t**)base)[offset] = i; }
+        vmint evalInt() OVERRIDE {
+            return (vmint)*(int64_t*)&(*(uint8_t**)base)[offset];
+        }
+        void assign(vmint i) OVERRIDE {
+            *(int64_t*)&(*(uint8_t**)base)[offset] = (int64_t)i;
+        }
+        bool isAssignable() const OVERRIDE { return !readonly; }
+    };
+
+    /** @brief Pointer to built-in VM integer variable (of C/C++ type int32_t).
+     *
+     * Used for defining built-in 32 bit integer script variables.
+     *
+     * @b CAUTION: You may only use this class for pointing to C/C++ variables
+     * of type "int32_t" (thus being exactly 32 bit in size). If the C/C++ int
+     * variable you want to reference is 64 bit in size then you @b must use
+     * VMInt64RelPtr instead! Respectively for a referenced native variable with
+     * only 8 bit in size you @b must use VMInt8RelPtr instead!
+     *
+     * For efficiency reasons the actual native C/C++ int variable is referenced
+     * by two components here. The actual native int C/C++ variable in memory
+     * is dereferenced at VM run-time by taking the @c base pointer dereference
+     * and adding @c offset bytes. This has the advantage that for a large
+     * number of built-in int variables, only one (or few) base pointer need
+     * to be re-assigned before running a script, instead of updating each
+     * built-in variable each time before a script is executed.
+     *
+     * Refer to DECLARE_VMINT() for example code.
+     *
+     * @see VMInt64RelPtr, VMInt8RelPtr, DECLARE_VMINT()
+     */
+    struct VMInt32RelPtr : VMRelPtr, VMIntPtr {
+        VMInt32RelPtr() {
+            base   = NULL;
+            offset = 0;
+            readonly = false;
+        }
+        VMInt32RelPtr(const VMRelPtr& data) {
+            base   = data.base;
+            offset = data.offset;
+            readonly = false;
+        }
+        vmint evalInt() OVERRIDE {
+            return (vmint)*(int32_t*)&(*(uint8_t**)base)[offset];
+        }
+        void assign(vmint i) OVERRIDE {
+            *(int32_t*)&(*(uint8_t**)base)[offset] = (int32_t)i;
+        }
+        bool isAssignable() const OVERRIDE { return !readonly; }
     };
 
     /** @brief Pointer to built-in VM integer variable (of C/C++ type int8_t).
@@ -523,8 +1205,9 @@ namespace LinuxSampler {
      *
      * @b CAUTION: You may only use this class for pointing to C/C++ variables
      * of type "int8_t" (8 bit integer). If the C/C++ int variable you want to
-     * reference is an "int" type (which is 32 bit on most systems), then you
-     * @b must use VMIntRelPtr instead!
+     * reference is not exactly 8 bit in size then you @b must respectively use
+     * either VMInt32RelPtr for native 32 bit variables or VMInt64RelPtrl for
+     * native 64 bit variables instead!
      *
      * For efficiency reasons the actual native C/C++ int variable is referenced
      * by two components here. The actual native int C/C++ variable in memory
@@ -536,18 +1219,36 @@ namespace LinuxSampler {
      *
      * Refer to DECLARE_VMINT() for example code.
      *
-     * @see VMIntRelPtr, DECLARE_VMINT()
+     * @see VMIntRel32Ptr, VMIntRel64Ptr, DECLARE_VMINT()
      */
-    struct VMInt8RelPtr : VMIntRelPtr {
-        VMInt8RelPtr() : VMIntRelPtr() {}
-        VMInt8RelPtr(const VMRelPtr& data) : VMIntRelPtr(data) {}
-        virtual int evalInt() OVERRIDE {
-            return *(uint8_t*)&(*(uint8_t**)base)[offset];
+    struct VMInt8RelPtr : VMRelPtr, VMIntPtr {
+        VMInt8RelPtr() {
+            base   = NULL;
+            offset = 0;
+            readonly = false;
         }
-        virtual void assign(int i) OVERRIDE {
-            *(uint8_t*)&(*(uint8_t**)base)[offset] = i;
+        VMInt8RelPtr(const VMRelPtr& data) {
+            base   = data.base;
+            offset = data.offset;
+            readonly = false;
         }
+        vmint evalInt() OVERRIDE {
+            return (vmint)*(uint8_t*)&(*(uint8_t**)base)[offset];
+        }
+        void assign(vmint i) OVERRIDE {
+            *(uint8_t*)&(*(uint8_t**)base)[offset] = (uint8_t)i;
+        }
+        bool isAssignable() const OVERRIDE { return !readonly; }
     };
+
+    /** @brief Pointer to built-in VM integer variable (of C/C++ type vmint).
+     *
+     * Use this typedef if the native variable to be pointed to is using the
+     * typedef vmint. If the native C/C++ variable to be pointed to is using
+     * another C/C++ type then better use one of VMInt64RelPtr or VMInt32RelPtr
+     * instead.
+     */
+    typedef VMInt64RelPtr VMIntRelPtr;
 
     #if HAVE_CXX_EMBEDDED_PRAGMA_DIAGNOSTICS
     # define COMPILER_DISABLE_OFFSETOF_WARNING                    \
@@ -561,13 +1262,13 @@ namespace LinuxSampler {
     #endif
 
     /**
-     * Convenience macro for initializing VMIntRelPtr and VMInt8RelPtr
-     * structures. Usage example:
+     * Convenience macro for initializing VMInt64RelPtr, VMInt32RelPtr and
+     * VMInt8RelPtr structures. Usage example:
      * @code
      * struct Foo {
      *   uint8_t a; // native representation of a built-in integer script variable
-     *   int b; // native representation of another built-in integer script variable
-     *   int c; // native representation of another built-in integer script variable
+     *   int64_t b; // native representation of another built-in integer script variable
+     *   int64_t c; // native representation of another built-in integer script variable
      *   uint8_t d; // native representation of another built-in integer script variable
      * };
      *
@@ -578,8 +1279,8 @@ namespace LinuxSampler {
      * Foo* pFoo;
      *
      * VMInt8RelPtr varA = DECLARE_VMINT(pFoo, class Foo, a);
-     * VMIntRelPtr  varB = DECLARE_VMINT(pFoo, class Foo, b);
-     * VMIntRelPtr  varC = DECLARE_VMINT(pFoo, class Foo, c);
+     * VMInt64RelPtr varB = DECLARE_VMINT(pFoo, class Foo, b);
+     * VMInt64RelPtr varC = DECLARE_VMINT(pFoo, class Foo, c);
      * VMInt8RelPtr varD = DECLARE_VMINT(pFoo, class Foo, d);
      *
      * pFoo = &foo1;
@@ -614,10 +1315,10 @@ namespace LinuxSampler {
     )                                                             \
 
     /**
-     * Same as DECLARE_VMINT(), but this one defines the VMIntRelPtr and
-     * VMInt8RelPtr structures to be of read-only type. That means the script
-     * parser will abort any script at parser time if the script is trying to
-     * modify such a read-only built-in variable.
+     * Same as DECLARE_VMINT(), but this one defines the VMInt64RelPtr,
+     * VMInt32RelPtr and VMInt8RelPtr structures to be of read-only type.
+     * That means the script parser will abort any script at parser time if the
+     * script is trying to modify such a read-only built-in variable.
      *
      * @b NOTE: this is only intended for built-in read-only variables that
      * may change during runtime! If your built-in variable's data is rather
@@ -640,12 +1341,13 @@ namespace LinuxSampler {
     /** @brief Built-in VM 8 bit integer array variable.
      *
      * Used for defining built-in integer array script variables (8 bit per
-     * array element). Currently there is no support for any other kind of array
-     * type. So all integer arrays of scripts use 8 bit data types.
+     * array element). Currently there is no support for any other kind of
+     * built-in array type. So all built-in integer arrays accessed by scripts
+     * use 8 bit data types.
      */
     struct VMInt8Array {
         int8_t* data;
-        int size;
+        vmint size;
         bool readonly; ///< Whether the array data may be modified or just be read.
 
         VMInt8Array() : data(NULL), size(0), readonly(false) {}
@@ -653,7 +1355,8 @@ namespace LinuxSampler {
 
     /** @brief Virtual machine script variable.
      *
-     * Common interface for all variables accessed in scripts.
+     * Common interface for all variables accessed in scripts, independent of
+     * their precise data type.
      */
     class VMVariable : virtual public VMExpr {
     public:
@@ -674,7 +1377,7 @@ namespace LinuxSampler {
          */
         virtual void assignExpr(VMExpr* expr) = 0;
     };
-    
+
     /** @brief Dynamically executed variable (abstract base class).
      *
      * Interface for the implementation of a dynamically generated content of
@@ -748,6 +1451,9 @@ namespace LinuxSampler {
      */
     class VMDynIntVar : virtual public VMDynVar, virtual public VMIntExpr {
     public:
+        vmfloat unitFactor() const OVERRIDE { return VM_NO_FACTOR; }
+        StdUnit_t unitType() const OVERRIDE { return VM_NO_UNIT; }
+        bool isFinal() const OVERRIDE { return false; }
     };
 
     /** @brief Dynamically executed variable (of string data type).
@@ -809,7 +1515,7 @@ namespace LinuxSampler {
          * Returns a variable name indexed map of all built-in script variables
          * which point to native "int" scalar (usually 32 bit) variables.
          */
-        virtual std::map<String,VMIntRelPtr*> builtInIntVariables() = 0;
+        virtual std::map<String,VMIntPtr*> builtInIntVariables() = 0;
 
         /**
          * Returns a variable name indexed map of all built-in script integer
@@ -819,9 +1525,16 @@ namespace LinuxSampler {
 
         /**
          * Returns a variable name indexed map of all built-in constant script
-         * variables, which never change their value at runtime.
+         * variables of integer type, which never change their value at runtime.
          */
-        virtual std::map<String,int> builtInConstIntVariables() = 0;
+        virtual std::map<String,vmint> builtInConstIntVariables() = 0;
+
+        /**
+         * Returns a variable name indexed map of all built-in constant script
+         * variables of real number (floating point) type, which never change
+         * their value at runtime.
+         */
+        virtual std::map<String,vmfloat> builtInConstRealVariables() = 0;
 
         /**
          * Returns a variable name indexed map of all built-in dynamic variables,
@@ -870,7 +1583,7 @@ namespace LinuxSampler {
          *
          * @see ScriptVM::exec()
          */
-        virtual int suspensionTimeMicroseconds() const = 0;
+        virtual vmint suspensionTimeMicroseconds() const = 0;
 
         /**
          * Causes all polyphonic variables to be reset to zero values. A
@@ -906,6 +1619,30 @@ namespace LinuxSampler {
          * then may run independently with its own polyphonic data for instance.
          */
         virtual void forkTo(VMExecContext* ectx) const = 0;
+
+        /**
+         * In case the script called the built-in exit() function and passed a
+         * value as argument to the exit() function, then this method returns
+         * the value that had been passed as argument to the exit() function.
+         * Otherwise if the exit() function has not been called by the script
+         * or no argument had been passed to the exit() function, then this
+         * method returns NULL instead.
+         *
+         * Currently this is only used for automated test cases against the
+         * script engine, which return some kind of value in the individual
+         * test case scripts to check their behaviour in automated way. There
+         * is no purpose for this mechanism in production use. Accordingly this
+         * exit result value is @b always completely ignored by the sampler
+         * engines.
+         *
+         * Officially the built-in exit() function does not expect any arguments
+         * to be passed to its function call, and by default this feature is
+         * hence disabled and will yield in a parser error unless
+         * ScriptVM::setExitResultEnabled() was explicitly set.
+         *
+         * @see ScriptVM::setExitResultEnabled()
+         */
+        virtual VMExpr* exitResult() = 0;
     };
 
     /** @brief Script callback for a certain event.
@@ -1003,8 +1740,40 @@ namespace LinuxSampler {
             case EMPTY_EXPR: return "empty";
             case INT_EXPR: return "integer";
             case INT_ARR_EXPR: return "integer array";
+            case REAL_EXPR: return "real number";
+            case REAL_ARR_EXPR: return "real number array";
             case STRING_EXPR: return "string";
             case STRING_ARR_EXPR: return "string array";
+        }
+        return "invalid";
+    }
+
+    /**
+     * Returns @c true in case the passed data type is some array data type.
+     */
+    inline bool isArray(const ExprType_t& type) {
+        return type == INT_ARR_EXPR || type == REAL_ARR_EXPR ||
+               type == STRING_ARR_EXPR;
+    }
+
+    /**
+     * Returns @c true in case the passed data type is some scalar number type
+     * (i.e. not an array and not a string).
+     */
+    inline bool isNumber(const ExprType_t& type) {
+        return type == INT_EXPR || type == REAL_EXPR;
+    }
+
+    /**
+     * Convenience function used for converting an StdUnit_t constant to a
+     * string, i.e. for generating error message by the parser.
+     */
+    inline String unitTypeStr(const StdUnit_t& type) {
+        switch (type) {
+            case VM_NO_UNIT: return "none";
+            case VM_SECOND: return "seconds";
+            case VM_HERTZ: return "Hz";
+            case VM_BEL: return "Bel";
         }
         return "invalid";
     }
@@ -1108,12 +1877,17 @@ namespace LinuxSampler {
         bool isStringLiteral() const; ///< Returns true in case this source token represents a string literal (i.e. "Some text").
         bool isComment() const; ///< Returns true in case this source token represents a source code comment.
         bool isPreprocessor() const; ///< Returns true in case this source token represents a preprocessor statement.
+        bool isMetricPrefix() const;
+        bool isStdUnit() const;
         bool isOther() const; ///< Returns true in case this source token represents anything else not covered by the token types mentioned above.
 
         // extended types
         bool isIntegerVariable() const; ///< Returns true in case this source token represents an integer variable name (i.e. "$someIntVariable").
+        bool isRealVariable() const; ///< Returns true in case this source token represents a floating point variable name (i.e. "~someRealVariable").
         bool isStringVariable() const; ///< Returns true in case this source token represents an string variable name (i.e. "\@someStringVariable").
-        bool isArrayVariable() const; ///< Returns true in case this source token represents an array variable name (i.e. "%someArryVariable").
+        bool isIntArrayVariable() const; ///< Returns true in case this source token represents an integer array variable name (i.e. "%someArrayVariable").
+        bool isRealArrayVariable() const; ///< Returns true in case this source token represents a real number array variable name (i.e. "?someArrayVariable").
+        bool isArrayVariable() const DEPRECATED_API; ///< Returns true in case this source token represents an @b integer array variable name (i.e. "%someArrayVariable"). @deprecated This method will be removed, use isIntArrayVariable() instead.
         bool isEventHandlerName() const; ///< Returns true in case this source token represents an event handler name (i.e. "note", "release", "controller").
 
         VMSourceToken& operator=(const VMSourceToken& other);

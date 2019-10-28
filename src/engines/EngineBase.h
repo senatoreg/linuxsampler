@@ -2028,15 +2028,9 @@ namespace LinuxSampler {
                 NoteBase* pNote = pChannel->pEngine->NoteByID( itEvent->Param.NoteSynthParam.NoteID );
                 if (!pNote || pNote->hostKey < 0 || pNote->hostKey >= 128) return;
 
-                const bool& relative = itEvent->Param.NoteSynthParam.Relative;
-
                 switch (itEvent->Param.NoteSynthParam.Type) {
                     case Event::synth_param_volume:
-                        if (relative)
-                            pNote->Override.Volume *= itEvent->Param.NoteSynthParam.Delta;
-                        else
-                            pNote->Override.Volume = itEvent->Param.NoteSynthParam.Delta;
-                        itEvent->Param.NoteSynthParam.AbsValue = pNote->Override.Volume;
+                        pNote->apply(itEvent, &NoteBase::_Override::Volume);
                         break;
                     case Event::synth_param_volume_time:
                         pNote->Override.VolumeTime = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
@@ -2046,11 +2040,7 @@ namespace LinuxSampler {
                         pNote->Override.VolumeCurve = (fade_curve_t) itEvent->Param.NoteSynthParam.AbsValue;
                         break;
                     case Event::synth_param_pitch:
-                        if (relative)
-                            pNote->Override.Pitch *= itEvent->Param.NoteSynthParam.Delta;
-                        else
-                            pNote->Override.Pitch = itEvent->Param.NoteSynthParam.Delta;
-                        itEvent->Param.NoteSynthParam.AbsValue = pNote->Override.Pitch;
+                        pNote->apply(itEvent, &NoteBase::_Override::Pitch);
                         break;
                     case Event::synth_param_pitch_time:
                         pNote->Override.PitchTime = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
@@ -2060,13 +2050,7 @@ namespace LinuxSampler {
                         pNote->Override.PitchCurve = (fade_curve_t) itEvent->Param.NoteSynthParam.AbsValue;
                         break;
                     case Event::synth_param_pan:
-                        if (relative) {
-                            pNote->Override.Pan = RTMath::RelativeSummedAvg(pNote->Override.Pan, itEvent->Param.NoteSynthParam.Delta, ++pNote->Override.PanSources);
-                        } else {
-                            pNote->Override.Pan = itEvent->Param.NoteSynthParam.Delta;
-                            pNote->Override.PanSources = 1; // only relevant on subsequent change_pan() instrument script calls on same note with 'relative' argument being set
-                        }
-                        itEvent->Param.NoteSynthParam.AbsValue = pNote->Override.Pan;
+                        pNote->apply(itEvent, &NoteBase::_Override::Pan);
                         break;
                     case Event::synth_param_pan_time:
                         pNote->Override.PanTime = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
@@ -2076,54 +2060,54 @@ namespace LinuxSampler {
                         pNote->Override.PanCurve = (fade_curve_t) itEvent->Param.NoteSynthParam.AbsValue;
                         break;
                     case Event::synth_param_cutoff:
-                        pNote->Override.Cutoff = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Cutoff);
                         break;
                     case Event::synth_param_resonance:
-                        pNote->Override.Resonance = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Resonance);
                         break;
                     case Event::synth_param_attack:
-                        pNote->Override.Attack = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Attack);
                         break;
                     case Event::synth_param_decay:
-                        pNote->Override.Decay = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Decay);
                         break;
                     case Event::synth_param_sustain:
-                        pNote->Override.Sustain = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Sustain);
                         break;
                     case Event::synth_param_release:
-                        pNote->Override.Release = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Release);
                         break;
 
                     case Event::synth_param_cutoff_attack:
-                        pNote->Override.CutoffAttack = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffAttack);
                         break;
                     case Event::synth_param_cutoff_decay:
-                        pNote->Override.CutoffDecay = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffDecay);
                         break;
                     case Event::synth_param_cutoff_sustain:
-                        pNote->Override.CutoffSustain = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffSustain);
                         break;
                     case Event::synth_param_cutoff_release:
-                        pNote->Override.CutoffRelease = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffRelease);
                         break;
 
                     case Event::synth_param_amp_lfo_depth:
-                        pNote->Override.AmpLFODepth = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::AmpLFODepth);
                         break;
                     case Event::synth_param_amp_lfo_freq:
-                        pNote->Override.AmpLFOFreq = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::AmpLFOFreq);
                         break;
                     case Event::synth_param_cutoff_lfo_depth:
-                        pNote->Override.CutoffLFODepth = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffLFODepth);
                         break;
                     case Event::synth_param_cutoff_lfo_freq:
-                        pNote->Override.CutoffLFOFreq = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffLFOFreq);
                         break;
                     case Event::synth_param_pitch_lfo_depth:
-                        pNote->Override.PitchLFODepth = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::PitchLFODepth);
                         break;
                     case Event::synth_param_pitch_lfo_freq:
-                        pNote->Override.PitchLFOFreq = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::PitchLFOFreq);
                         break;
                 }
 

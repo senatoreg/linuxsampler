@@ -39,46 +39,9 @@
 #include "../gig/Synthesizer.h"
 #include "../gig/Profiler.h"
 #include "SignalUnitRack.h"
-
-// include the appropriate (unsigned) triangle LFO implementation
-#if CONFIG_UNSIGNED_TRIANG_ALGO == INT_MATH_SOLUTION
-# include "LFOTriangleIntMath.h"
-#elif CONFIG_UNSIGNED_TRIANG_ALGO == INT_ABS_MATH_SOLUTION
-# include "LFOTriangleIntAbsMath.h"
-#elif CONFIG_UNSIGNED_TRIANG_ALGO == DI_HARMONIC_SOLUTION
-# include "LFOTriangleDiHarmonic.h"
-#else
-# error "Unknown or no (unsigned) triangle LFO implementation selected!"
-#endif
-
-// include the appropriate (signed) triangle LFO implementation
-#if CONFIG_SIGNED_TRIANG_ALGO == INT_MATH_SOLUTION
-# include "LFOTriangleIntMath.h"
-#elif CONFIG_SIGNED_TRIANG_ALGO == INT_ABS_MATH_SOLUTION
-# include "LFOTriangleIntAbsMath.h"
-#elif CONFIG_SIGNED_TRIANG_ALGO == DI_HARMONIC_SOLUTION
-# include "LFOTriangleDiHarmonic.h"
-#else
-# error "Unknown or no (signed) triangle LFO implementation selected!"
-#endif
+#include "LFOCluster.h"
 
 namespace LinuxSampler {
-
-    #if CONFIG_UNSIGNED_TRIANG_ALGO == INT_MATH_SOLUTION
-    typedef LFOTriangleIntMath<range_unsigned> LFOUnsigned;
-    #elif CONFIG_UNSIGNED_TRIANG_ALGO == INT_ABS_MATH_SOLUTION
-    typedef LFOTriangleIntAbsMath<range_unsigned> LFOUnsigned;
-    #elif CONFIG_UNSIGNED_TRIANG_ALGO == DI_HARMONIC_SOLUTION
-    typedef LFOTriangleDiHarmonic<range_unsigned> LFOUnsigned;
-    #endif
-
-    #if CONFIG_SIGNED_TRIANG_ALGO == INT_MATH_SOLUTION
-    typedef LFOTriangleIntMath<range_signed> LFOSigned;
-    #elif CONFIG_SIGNED_TRIANG_ALGO == INT_ABS_MATH_SOLUTION
-    typedef LFOTriangleIntAbsMath<range_signed> LFOSigned;
-    #elif CONFIG_SIGNED_TRIANG_ALGO == DI_HARMONIC_SOLUTION
-    typedef LFOTriangleDiHarmonic<range_signed> LFOSigned;
-    #endif
 
     class AbstractVoice : public Voice {
         public:
@@ -157,8 +120,8 @@ namespace LinuxSampler {
             float                       VolumeLeft;         ///< Left channel volume. This factor is calculated when the voice is triggered and doesn't change after that.
             float                       VolumeRight;        ///< Right channel volume. This factor is calculated when the voice is triggered and doesn't change after that.
             Fade                        NotePan[2];         ///< Updated by calls to built-in instrument script function change_pan() (defaults to 1.0, that is neutral, index 0 for left pan, index 1 for right).
-            float                       NoteCutoff;         ///< Updated by calls to built-in instrument script function change_cutoff() (defaults to 1.0, that is neutral).
-            float                       NoteResonance;      ///< Updated by calls to built-in instrument script function change_reso() (defaults to 1.0, that is neutral).
+            NoteBase::Norm              NoteCutoff;         ///< Updated by calls to built-in instrument script function change_cutoff() (defaults to 1.0, that is neutral).
+            NoteBase::Norm              NoteResonance;      ///< Updated by calls to built-in instrument script function change_reso() (defaults to 1.0, that is neutral).
             gig::SmoothVolume           CrossfadeSmoother;  ///< Crossfade volume, updated by crossfade CC events
             gig::SmoothVolume           VolumeSmoother;     ///< Volume, updated by CC 7 (volume) events
             gig::SmoothVolume           PanLeftSmoother;    ///< Left channel volume, updated by CC 10 (pan) events and change_pan() real-time instrument script calls.
@@ -173,9 +136,9 @@ namespace LinuxSampler {
             gig::EGDecay                EG3;                ///< Envelope Generator 3 (Pitch) TODO: use common EG instead?
             midi_ctrl                   VCFCutoffCtrl;
             midi_ctrl                   VCFResonanceCtrl;
-            LFOUnsigned*                pLFO1;               ///< Low Frequency Oscillator 1 (Amplification)
-            LFOUnsigned*                pLFO2;               ///< Low Frequency Oscillator 2 (Filter cutoff frequency)
-            LFOSigned*                  pLFO3;               ///< Low Frequency Oscillator 3 (Pitch)
+            LFOClusterUnsigned*         pLFO1;               ///< Low Frequency Oscillator 1 (Amplification)
+            LFOClusterUnsigned*         pLFO2;               ///< Low Frequency Oscillator 2 (Filter cutoff frequency)
+            LFOClusterSigned*           pLFO3;               ///< Low Frequency Oscillator 3 (Pitch)
             bool                        bLFO1Enabled;        ///< Should we use the Amplitude LFO for this voice?
             bool                        bLFO2Enabled;        ///< Should we use the Filter Cutoff LFO for this voice?
             bool                        bLFO3Enabled;        ///< Should we use the Pitch LFO for this voice?

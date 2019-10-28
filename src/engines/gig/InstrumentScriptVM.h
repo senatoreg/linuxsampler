@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 - 2017 Christian Schoenebeck
+ * Copyright (c) 2014 - 2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -23,13 +23,13 @@ namespace LinuxSampler { namespace gig {
      * Note that this class is currently re-entrant safe, but @b not thread
      * safe! See also comments of base class ScriptVM regarding this issue.
      */
-    class InstrumentScriptVM : public LinuxSampler::InstrumentScriptVM {
+    class InstrumentScriptVM FINAL : public LinuxSampler::InstrumentScriptVM {
     public:
         InstrumentScriptVM();
         VMFunction* functionByName(const String& name) OVERRIDE;
-        //std::map<String,VMIntRelPtr*> builtInIntVariables() OVERRIDE;
+        //std::map<String,VMIntPtr*> builtInIntVariables() OVERRIDE;
         //std::map<String,VMInt8Array*> builtInIntArrayVariables() OVERRIDE;
-        std::map<String,int> builtInConstIntVariables() OVERRIDE;
+        std::map<String,vmint> builtInConstIntVariables() OVERRIDE;
     protected:
         InstrumentScriptVMFunction_gig_set_dim_zone   m_fnGigSetDimZone;
         InstrumentScriptVMFunction_same_region        m_fnSameRegion;

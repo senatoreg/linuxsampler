@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017 Christian Schoenebeck
+ * Copyright (c) 2014-2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -51,12 +51,12 @@ enum InstrScriptIDType_T {
     /**
      * Used to mark IDs (in script scope) to actually be a MIDI event ID.
      */
-    INSTR_SCRIPT_EVENT_ID_FLAG = INSTR_SCRIPT_ID_TYPE_FLAG(0),
+    INSTR_SCRIPT_EVENT_ID_FLAG = INSTR_SCRIPT_ID_TYPE_FLAG(0LL),
 
     /**
      * Used to mark IDs (in script scope) to actually be a note ID.
      */
-    INSTR_SCRIPT_NOTE_ID_FLAG = INSTR_SCRIPT_ID_TYPE_FLAG(1),
+    INSTR_SCRIPT_NOTE_ID_FLAG = INSTR_SCRIPT_ID_TYPE_FLAG(1LL),
 };
 
 #define INSTR_SCRIPT_EVENT_GROUPS 28
@@ -118,7 +118,7 @@ namespace LinuxSampler {
         /**
          * Construct a ScriptID object with an ID from script scope.
          */
-        ScriptID(uint id) : m_id(id) {}
+        ScriptID(vmint id) : m_id(id) {}
 
         /**
          * Returns a ScriptID object constructed with an event ID from engine
@@ -180,12 +180,12 @@ namespace LinuxSampler {
          * Integer cast operator, which returns an ID number of this ScripID
          * object intended for script scope.
          */
-        inline operator uint() const {
+        inline operator vmint() const {
             return m_id;
         }
 
     private:
-        uint m_id;
+        vmint m_id;
     };
 
     /** @brief List of Event IDs.
@@ -193,16 +193,16 @@ namespace LinuxSampler {
      * Used for built-in script functions:
      *     by_marks(), set_event_mark(), delete_event_mark()
      */
-    class EventGroup : protected ConstCapacityArray<int> {
+    class EventGroup : protected ConstCapacityArray<vmint> {
     public:
-        EventGroup() : ConstCapacityArray<int>(CONFIG_MAX_EVENTS_PER_FRAGMENT), m_script(NULL) {}
-        void insert(int eventID);
-        void erase(int eventID);
+        EventGroup() : ConstCapacityArray<vmint>(CONFIG_MAX_EVENTS_PER_FRAGMENT), m_script(NULL) {}
+        void insert(vmint eventID);
+        void erase(vmint eventID);
         void setScript(InstrumentScript* pScript) { m_script = pScript; }
-        inline int size() const { return ConstCapacityArray<int>::size(); }
-        inline void clear() { ConstCapacityArray<int>::clear(); }
-        inline int& operator[](uint index) { return ConstCapacityArray<int>::operator[](index); }
-        inline const int& operator[](uint index) const { return ConstCapacityArray<int>::operator[](index); }
+        inline size_t size() const { return ConstCapacityArray<vmint>::size(); }
+        inline void clear() { ConstCapacityArray<vmint>::clear(); }
+        inline vmint& operator[](ssize_t index) { return ConstCapacityArray<vmint>::operator[](index); }
+        inline const vmint& operator[](ssize_t index) const { return ConstCapacityArray<vmint>::operator[](index); }
     protected:
         InstrumentScript* m_script;
     };
@@ -257,9 +257,9 @@ namespace LinuxSampler {
         InstrumentScriptVM();
         VMExecStatus_t exec(VMParserContext* parserCtx, ScriptEvent* event);
         VMFunction* functionByName(const String& name) OVERRIDE;
-        std::map<String,VMIntRelPtr*> builtInIntVariables() OVERRIDE;
+        std::map<String,VMIntPtr*> builtInIntVariables() OVERRIDE;
         std::map<String,VMInt8Array*> builtInIntArrayVariables() OVERRIDE;
-        std::map<String,int> builtInConstIntVariables() OVERRIDE;
+        std::map<String,vmint> builtInConstIntVariables() OVERRIDE;
         std::map<String,VMDynVar*> builtInDynamicVariables() OVERRIDE;
     protected:
         ScriptEvent* m_event; ///< The event currently executed by exec().
@@ -273,8 +273,8 @@ namespace LinuxSampler {
         VMInt8Array  m_KEY_DOWN;
         //VMIntArray m_POLY_AT; //TODO: ...
         //int m_POLY_AT_NUM; //TODO: ...
-        VMIntRelPtr  m_NI_CALLBACK_TYPE;
-        VMIntRelPtr  m_NKSP_IGNORE_WAIT;
+        VMInt32RelPtr m_NI_CALLBACK_TYPE;
+        VMInt8RelPtr m_NKSP_IGNORE_WAIT;
         VMIntRelPtr  m_NKSP_CALLBACK_PARENT_ID;
 
         // built-in script functions

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 - 2017 Christian Schoenebeck
+ * Copyright (c) 2014 - 2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -20,7 +20,7 @@ namespace LinuxSampler {
     ///////////////////////////////////////////////////////////////////////
     // class 'EventGroup'
 
-    void EventGroup::insert(int eventID) {
+    void EventGroup::insert(vmint eventID) {
         if (contains(eventID)) return;
 
         AbstractEngine* pEngine = m_script->pEngineChannel->pEngine;
@@ -31,8 +31,8 @@ namespace LinuxSampler {
         // events die before being removed explicitly from the group by script
         //
         // NOTE: or should we do this "dead ones" check only once in a while?
-        int firstDead = -1;
-        for (int i = 0; i < size(); ++i) {
+        ssize_t firstDead = -1;
+        for (size_t i = 0; i < size(); ++i) {
             if (firstDead >= 0) {
                 if (pEngine->EventByID(eventID)) {
                     remove(firstDead, i - firstDead);
@@ -46,8 +46,8 @@ namespace LinuxSampler {
         append(eventID);
     }
 
-    void EventGroup::erase(int eventID) {
-        int index = find(eventID);
+    void EventGroup::erase(vmint eventID) {
+        size_t index = find(eventID);
         remove(index);
     }
 
@@ -319,9 +319,9 @@ namespace LinuxSampler {
         return res;
     }
 
-    std::map<String,VMIntRelPtr*> InstrumentScriptVM::builtInIntVariables() {
+    std::map<String,VMIntPtr*> InstrumentScriptVM::builtInIntVariables() {
         // first get built-in integer variables of derived VM class
-        std::map<String,VMIntRelPtr*> m = ScriptVM::builtInIntVariables();
+        std::map<String,VMIntPtr*> m = ScriptVM::builtInIntVariables();
 
         // now add own built-in variables
         m["$CC_NUM"] = &m_CC_NUM;
@@ -348,9 +348,9 @@ namespace LinuxSampler {
         return m;
     }
 
-    std::map<String,int> InstrumentScriptVM::builtInConstIntVariables() {
+    std::map<String,vmint> InstrumentScriptVM::builtInConstIntVariables() {
         // first get built-in integer variables of derived VM class
-        std::map<String,int> m = ScriptVM::builtInConstIntVariables();
+        std::map<String,vmint> m = ScriptVM::builtInConstIntVariables();
 
         m["$EVENT_STATUS_INACTIVE"] = EVENT_STATUS_INACTIVE;
         m["$EVENT_STATUS_NOTE_QUEUE"] = EVENT_STATUS_NOTE_QUEUE;

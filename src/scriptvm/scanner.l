@@ -108,7 +108,9 @@ static int countCharsPastLastNewLine(const char* txt) {
 %x PREPROC_SET_COND PREPROC_RESET_COND PREPROC_IF PREPROC_IF_NOT PREPROC_BODY_EAT PREPROC_PRE_BODY_USE PREPROC_PRE_BODY_EAT
 
 DIGIT    [0-9]
-ID       [a-zA-Z0-9_]+
+ID       [a-zA-Z][a-zA-Z0-9_]*
+METRIC   (k|h|(da)|d|c|m|u)
+UNIT     (s|(Hz)|B)
 
 %%
 
@@ -119,14 +121,111 @@ ID       [a-zA-Z0-9_]+
 }
 
 {DIGIT}+ {
-    yylval->iValue = atoi(yytext);
+    if (sizeof(vmint) < 8)
+        yylval->iValue = atoi(yytext);
+    else
+        yylval->iValue = atoll(yytext);
     return INTEGER;
 }
 
- /* there is currently no support for floating point numbers in NKSP yet */
- /*{DIGIT}+"."{DIGIT}* {
-    printf("A float: %s (%g)\n", yytext, atof(yytext));
- }*/
+{DIGIT}+"."{DIGIT}+ {
+    yylval->fValue = atof(yytext);
+    return REAL;
+}
+
+{DIGIT}+({METRIC}{1,2}|({METRIC}{0,2}{UNIT}?)) {
+    int pos = 0;
+
+    // parse number portion
+    vmint value = 0;
+    for (; yytext[pos] >= '0' && yytext[pos] <= '9'; ++pos) {
+        value *= 10;
+        value += yytext[pos] - '0';
+    }
+    yylval->iUnitValue.iValue = value;
+
+    // parse metric prefix portion
+    for (int i = 0; i < 2; ++i, ++pos) {
+        switch (yytext[pos]) {
+            case 'k': yylval->iUnitValue.prefix[i] = VM_KILO;  continue;
+            case 'h': yylval->iUnitValue.prefix[i] = VM_HECTO; continue;
+            case 'c': yylval->iUnitValue.prefix[i] = VM_CENTI; continue;
+            case 'm': yylval->iUnitValue.prefix[i] = VM_MILLI; continue;
+            case 'u': yylval->iUnitValue.prefix[i] = VM_MICRO; continue;
+            case 'd':
+                if (yytext[pos+1] == 'a') {
+                    yylval->iUnitValue.prefix[i] = VM_DECA;
+                    ++pos;
+                } else {
+                    yylval->iUnitValue.prefix[i] = VM_DECI;
+                }
+                continue;
+            default:
+                yylval->iUnitValue.prefix[i] = VM_NO_PREFIX;
+                goto parseIntStdUnit;
+        }
+    }
+
+    parseIntStdUnit:
+
+    // parse standard measurement unit
+    switch (yytext[pos]) {
+        case 's': yylval->iUnitValue.unit = VM_SECOND;  break;
+        case 'H': yylval->iUnitValue.unit = VM_HERTZ;   break;
+        case 'B': yylval->iUnitValue.unit = VM_BEL;     break;
+        default:  yylval->iUnitValue.unit = VM_NO_UNIT; break;
+    }
+
+    return INTEGER_UNIT;
+}
+
+{DIGIT}+"."{DIGIT}+({METRIC}{1,2}|({METRIC}{0,2}{UNIT}?)) {
+    int pos = 0;
+
+    // parse number portion
+    for (; (yytext[pos] >= '0' && yytext[pos] <= '9') || yytext[pos] == '.'; ++pos) {
+    }
+    {
+        const char tmp = yytext[pos];
+        yytext[pos] = 0; // mark temporary end of string
+        yylval->fUnitValue.fValue = atof(yytext);
+        yytext[pos] = tmp; // restore
+    }
+
+    // parse metric prefix portion
+    for (int i = 0; i < 2; ++i, ++pos) {
+        switch (yytext[pos]) {
+            case 'k': yylval->fUnitValue.prefix[i] = VM_KILO;  continue;
+            case 'h': yylval->fUnitValue.prefix[i] = VM_HECTO; continue;
+            case 'c': yylval->fUnitValue.prefix[i] = VM_CENTI; continue;
+            case 'm': yylval->fUnitValue.prefix[i] = VM_MILLI; continue;
+            case 'u': yylval->fUnitValue.prefix[i] = VM_MICRO; continue;
+            case 'd':
+                if (yytext[pos+1] == 'a') {
+                    yylval->fUnitValue.prefix[i] = VM_DECA;
+                    ++pos;
+                } else {
+                    yylval->fUnitValue.prefix[i] = VM_DECI;
+                }
+                continue;
+            default:
+                yylval->fUnitValue.prefix[i] = VM_NO_PREFIX;
+                goto parseRealStdUnit;
+        }
+    }
+
+    parseRealStdUnit:
+
+    // parse standard measurement unit
+    switch (yytext[pos]) {
+        case 's': yylval->fUnitValue.unit = VM_SECOND;  break;
+        case 'H': yylval->fUnitValue.unit = VM_HERTZ;   break;
+        case 'B': yylval->fUnitValue.unit = VM_BEL;     break;
+        default:  yylval->fUnitValue.unit = VM_NO_UNIT; break;
+    }
+
+    return REAL_UNIT;
+}
 
 
  /* Preprocessor statement:  SET_CONDITION(name) */
@@ -268,11 +367,11 @@ ID       [a-zA-Z0-9_]+
 "call" return CALL;
 "synchronized" return SYNCHRONIZED;
 
-[&,()[\]<>=*+#/-] {
+[&,!()[\]<>=*+#\/-] {
     return *yytext;
 }
 
-("$"|"@"|"%"){ID} {
+("$"|"@"|"%"|"~"|"?"){ID} {
     yylval->sValue = strdup(yytext);
     return VARIABLE;
 }

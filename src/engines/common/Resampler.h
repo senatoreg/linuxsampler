@@ -3,7 +3,7 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003, 2004 by Benno Senoner and Christian Schoenebeck   *
- *   Copyright (C) 2005 - 2012 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2019 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -29,9 +29,11 @@
 
 #include "../../common/global_private.h"
 
-// TODO: cubic interpolation is not yet supported by the MMX/SSE(1) version though
 #ifndef USE_LINEAR_INTERPOLATION
-# define USE_LINEAR_INTERPOLATION   1  ///< set to 0 if you prefer cubic interpolation (slower, better quality)
+# define USE_LINEAR_INTERPOLATION   0  ///< we set this to 0 by default for using cubic interpolation instead (slightly slower, but much better audio quality than linear interpolation)
+#endif
+#if USE_LINEAR_INTERPOLATION
+# warning Linear interpolation was configured as resampling algorithm, which is deprecated!
 #endif
 
 namespace LinuxSampler {

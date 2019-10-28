@@ -1,5 +1,260 @@
 Version SVN trunk (?)
 
+  * general changes:
+    - Fixed compiler error in Pool.h.
+    - Require C++14 compiler support.
+    - Autoconf: Added m4/ax_cxx_compile_stdcxx.m4 macro which is used
+      for checking in configure for C++14 support (as mandatory
+      requirement) and automatically adds compiler argument if required
+      (e.g. -std=C++14).
+    - RTMath: Implemented floating point comparison methods
+      fEqual32(float,float) and fEqual64(double,double) which take the
+      expected floating point tolerances into account.
+    - Added public API C++ class "LFO", which is a cluster class encapsulating
+      all the sampler's LFO implementations to be used by 3rd party applications
+      (e.g. by Gigedit).
+    - Added int math square LFO implementation.
+    - Added int math saw LFO implementation.
+    - Added numeric complex nr sine LFO implementation.
+    - Marked class LFOTriangleDiHarmonic as deprecated
+      (will be removed in future).
+    - Added LFOAll.h which includes all LFO implementation's header files.
+    - Refactored LFO class names and their file names (PulseLFO -> LFOPulse,
+      LFOSawIntMath -> LFOSawIntMathNew, SawLFO -> LFOSawIntMathOld,
+      SineLFO -> LFOSineBuiltinFn, LFOSine -> LFOSineNumericComplexNr,
+      SquareLFO -> LFOSquarePulse and separated the latter to its own header
+      file).
+    - Renamed type LFOSigned -> LFOTriangleSigned.
+    - Renamed type LFOUnsigned -> LFOTriangleUnsigned.
+    - Using now cubic interpolation as resampling algorithm by default; and
+      linear interpolation is deprecated now.
+
+  * Real-time instrument scripts:
+    - Added method ScriptVM::setExitResultEnabled() which allows to
+      explicitly enable the built-in exit() function to optionally accept
+      one function argument; the value of the passed exit() function
+      argument will then become available by calling
+      VMExecContext::exitResult() after script execution.
+    - 64 bit support for NKSP integer scripts variables (declare $foo).
+    - Variable names, function names and preprocessor condition names must start
+      with a regular character (a-z or A-Z); starting them with a digit or
+      underscore is not allowed.
+    - NKSP parser fix: equal comparison operator "=" and not equal comparison
+      operator "#" must only accept integer operands.
+    - NKSP language: Implemented support for standard units like Hertz, seconds,
+      Bel including support for metric unit prefixes; so one can now e.g.
+      conveniently use numbers in scripts like "5us" meaning "5 microseconds",
+      or e.g. "12kHz" meaning "12 kilo Hertz", or e.g. "-14mdB" meaning
+      "minus 14 Millidecibel", or e.g. "28c" meaning "28 cents" (for tuning).
+    - NKSP language: Introduced "final" operator "!" which is specifically
+      intended for synthesis parameter values to denote that the synthesis
+      parameter value is intended to be the "final" value for that synthesis
+      parameter that should explicitly be used by the engine and thus causing
+      the sampler engine to ignore all other modulation sources for the same
+      synthesis parameter (like e.g. LFO, EG); by simply prefixing a value,
+      variable or formula with this new "!" operator the expression is marked as
+      being "final".
+    - NKSP script editor API: Added support for detecting standard unit tokens
+      and their potential metric prefix token.
+    - NKSP language: Added support for NKSP real number literals and
+      arithmetic operations on them (e.g. "(3.9 + 2.9) / 12.3 - 42.0").
+    - NKSP language: Added support for NKSP real number (floating point) script
+      variables (declare ~foo).
+    - NKSP language: Added support for NKSP real number (floating point) array
+      script variables (declare ?foo[]).
+    - Built-in script function "message()" accepts now real number argument as
+      well.
+    - Added built-in script function "real_to_int()" and its short hand form
+      "int()" for casting from real number to integer in NKSP scripts.
+    - Added built-in script function "int_to_real()" and its short hand form
+      "real()" for casting from integer to real number in NKSP scripts.
+    - Allow built-in exit() function to potentially accept real number type
+      argument as well.
+    - Built-in script functions may have a different return type depending on
+      the arguments passed to the function.
+    - Built-in script function "abs()" optionally accepts and returns real
+      number.
+    - Built-in script functions "min()" and "max()" optionally accept real
+      number arguments and return real number as result in that case.
+    - NKSP VM API: Allow units and 'final'ness to be returned as result from
+      built-in functions (added methods VMFunction::returnUnitType() and
+      VMFunction::returnsFinal() for that purpose which must be implemented by
+      built-in function implementations).
+    - NKSP language: Allow metric unit prefixes of numeric scalar and array
+      variables to be changed freely at runtime (unlike unit types like Hz etc.
+      which are still sticky, parse-time features of variables which cannot be
+      changed at runtime for the intentional sake of determinism).
+    - NKSP language: 'final' values are prohibited for array variables for now
+      (attempt causes a parsers error).
+    - NKSP language: expressions with unit types (e.g. Hz) are prohibited for
+      conditions of runtime control structures like if(), while(), select()
+      (attempt causes a parser error).
+    - NKSP VM API: Allow built-in functions to perform their own, individual
+      parse time checks of arguments going to be passed to the function at
+      runtime (added method VMFunction::checkArgs() for that purpose).
+    - NKSP language: raise parser warning if only one operand of binary
+      operators (like logical 'or' comparison) contain a 'final' value (because
+      it would always yield in a 'final' result in such cases).
+    - NKSP language: Allow comparison (=, #, <, >, <=, >=) of values with
+      different metric unit prefixes, which will behave as expected (e.g.
+      result of expression '1000us < 2ms' is true).
+    - NKSP language: Allow adding values with different metric unit prefixes
+      (e.g. result of expression '100Hz + 5kHz' is '5100Hz').
+    - NKSP language: Allow subtracting values with different metric unit
+      prefixes (e.g. result of expression '1ms - 20us' is '980us').
+    - NKSP language: Allow multiplying with any metric unit prefixes
+      (e.g. result of expression '2k * 3ms' is '6s'), however multiplications
+      with unit types on both sides (e.g. '2s * 2s') is still prohibited since
+      we don't have any considerable practical use for a term like '4s^2'
+      (hence any attempt multiplying two unit types still causes parser error).
+    - NKSP language: Allow dividing by any metric unit prefixes and allow
+      division of same unit type on both sides (e.g. expression '8kHz / 1000Hz'
+      yields in unit free result '8'). So this is now a way to cast units away
+      e.g. for passing the result to other expressions, certain function calls
+      or variables which are not accepting any units (or that specific unit).
+    - NKSP language: integer arrays and real number arrays can now be converted
+      to strings (e.g. for dumping their content with message() calls for
+      script debugging purposes).
+    - NKSP language: expressions and variables with units are now correctly
+      casted to strings (e.g. with message() calls).
+    - NKSP language: comparing real numbers for equalness (e.g. '~foo = 3.1') or
+      unequalness (e.g. '~foo # 3.1') is now less strict and takes the expected
+      floating point tolerances into account.
+    - NKSP VM API: Added methods VMScalarNumberExpr::evalCastInt() and
+      VMScalarNumberExpr::evalCastReal().
+    - NKSP VM API: Added base class 'VMNumberArrayExpr' for classes
+      'VMIntArrayExpr' and 'VMRealArrayExpr'.
+    - NKSP VM API: replaced all unitPrefix() (parse time) methods by
+      unitFactor() (runtime) methods.
+    - Built-in function "exit()" supports now returning units and 'final'ness
+      for test cases.
+    - The following built-in functions support now units as well: "abs()",
+      "random()", "inc()", "dec()", "in_range()", "min()", "max()",
+      "real_to_int()", "int()", "int_to_real()" and "real()".
+    - Built-in functions "array_equal()", "search()" and "sort()" support now
+      real number arrays (correctly) as well.
+    - Added individual parse time checks of arguments to be passed to built-in
+      functions "random()", "inc()", "dec()", "in_range()", "min()", "max()",
+      "array_equal()" and "search()" specific for their individual purposes.
+    - NKSP VM refactoring: Renamed all methods, functions and classes matching
+      pattern *ScalarNumber* to simply *Number* (that is i.e. classes
+      VMScalarNumberExpr -> VMNumberExpr, ScalarNumberExpr -> NumberExpr,
+      ScalarNumberVariable -> NumberVariable, ScalarNumberBinaryOp ->
+      NumberBinaryOp, VMScalarNumberResultFunction -> VMNumberResultFunction,
+      method VMExpr::asScalarNumberExpr() -> VMExpr::asNumber(), function
+      isScalarNumber() -> isNumber()).
+    - NKSP VM API: Added 4 overridden methods to class VMNumberExpr:
+      evalCastInt(MetricPrefix_t), evalCastInt(MetricPrefix_t,MetricPrefix_t),
+      evalCastReal(MetricPrefix_t), evalCastReal(MetricPrefix_t,MetricPrefix_t)
+      as convenient methods for automatically converting values to expected
+      metric value basis.
+    - Built-in function "wait()" accepts now both integers and real numbers as
+      argument.
+    - NKSP VM API cleanup: Get rid of legacy method
+      VMFunction::argType(vmint iArg) which was already superseded by its new
+      replacement VMFunction::acceptsArgType(vmint iArg, ExprType_t type).
+    - NKSP parser: if wrong argument type was passed to a built-in function and
+      that built-in function accepts more than one data type for the argument,
+      then show all supported data types as parser error message.
+    - Built-in function "play_note()" accepts now real numbers and seconds as
+      unit type as well for its 3rd and 4th function arguments.
+    - The following built-in functions accept now real numbers as well for their
+      2nd function argument: "change_vol()", "change_tune()", "change_cutoff()",
+      "change_attack()", "change_decay()", "change_release()",
+      "change_sustain()", "change_cutoff_attack()", "change_cutoff_decay()",
+      "change_cutoff_sustain()", "change_cutoff_release()",
+      "change_amp_lfo_freq()", "change_cutoff_lfo_freq()",
+      "change_pitch_lfo_freq()", "change_vol_time()", "change_tune_time()",
+      "change_pan_time()", "fade_in()", "fade_out()", "change_play_pos()".
+    - Fixed built-in function "change_play_pos()" not having accepted metric
+      prefixes at all.
+    - Fixed the following built-in functions having misinterpreted values given
+      with unit type (for their 2nd argument) as if they were relative values
+      (that is as if they were passed without a unit type): "change_attack()",
+      "change_decay()", "change_release()", "change_cutoff_attack()",
+      "change_cutoff_decay()", "change_cutoff_release()".
+    - Fixed the following built-in functions having applied completely wrong
+      'final' values: "change_sustain()", "change_cutoff_sustain()" (since the
+      respective EGs being their modulation sink assume uint data type with
+      value range 0..1000 instead of 0.0..1.0.
+    - Added individual parse-time checks of function arguments for the following
+      built-in functions: "play_note()", "note_off()", "set_event_mark()",
+      "delete_event_mark()", "by_marks()", "change_cutoff()", "change_attack()",
+      "change_decay()", "change_release()", "change_cutoff_attack()",
+      "change_cutoff_decay()", "change_cutoff_release()",
+      "change_amp_lfo_freq()", "change_cutoff_lfo_freq()",
+      "change_pitch_lfo_freq()", "change_vol_time()", "change_tune_time()" and
+      "change_pan_time()".
+    - Don't abort function call if unit type was used and at the same time
+      'final' operator was omitted for the primary value argument of the
+      following built-in functions: "change_cutoff()", "change_attack()",
+      "change_decay()", "change_release()", "change_cutoff_attack()",
+      "change_cutoff_decay()", "change_cutoff_release()",
+      "change_amp_lfo_freq()", "change_cutoff_lfo_freq()",
+      "change_pitch_lfo_freq()", "change_vol_time()", "change_tune_time()",
+      "change_pan_time()", instead imply 'final'ness at runtime and raise an
+      appropriate parser warning at parse time.
+    - Added built-in real number functions "round()", "ceil()", "floor()",
+      "sqrt()", "log()", "log2()", "log10()", "exp()", "pow()", "sin()",
+      "cos()", "tan()", "asin()", "acos()", "atan()".
+    - Added built-in script real number constant "~NI_MATH_PI".
+    - Added built-in script real number constant "~NI_MATH_E".
+    - NKSP language: Allow unary '+' operator.
+
+  * test cases:
+    - Fixed compiler errors in test cases.
+    - Updated README for how to compile & run test cases.
+    - Updated test case
+      MutexTest::testDoubleLockStillBlocksConcurrentThread() to latest
+      expected behaviour of the Mutex class implementation (recursive
+      mutex type).
+    - Added test cases for NKSP core language aspects and core built-in
+      functions.
+    - Fixed thread tests segfaulting on Linux.
+    - NKSP: Added real number test cases for built-in functions exit(),
+      int_to_real(), real(), real_to_int() and int(), as well as for the
+      plus, minus and negate language operators.
+    - Added massive amount of NKSP test cases for standard measuring units and
+      'final' operator usage cases.
+    - Added NKSP test cases for (floating point tolerance aware) real number
+      equalness / unequalness comparison.
+    - Added NKSP int array and real array tests for value assignment and
+      initialization of arrays.
+    - Added NKSP test cases for built-in functions "round()", "ceil()",
+      "floor()", "sqrt()", "log()", "log2()", "log10()", "exp()", "pow()",
+      "sin()", "cos()", "tan()", "asin()", "acos()", "atan()".
+    - Added NKSP test cases for unary '+' operator.
+
+  * GigaStudio/Gigasampler format engine:
+    - LFOTriangleIntMath and LFOTriangleIntAbsMath: Fixed FlipPhase=true
+      behaviour for start_level_mid.
+    - Changed LFO start levels: LFO1 and LFO2 both to mid, LFO3 to max. start
+      level (see discussion "GigaStudio LFO compatibility" on mailing list
+      from 2019-09-26 for details).
+    - Changed default wave form for all 3 LFOs to sine (instead of triangle;
+      see discussion "GigaStudio LFO compatibility" on mailing list from
+      2019-09-26 for details).
+    - Format extension: Added support for different LFO wave forms (currently
+      either sine [default], triangle, saw or square).
+    - Format extension: Added support for LFO phase displacement (0°..360°).
+    - Format extension: Added support for flipping LFO polarity on LFO 3
+      (in the original gig format this was only available for LFO 1 and LFO 2).
+
+  * SFZ format engine:
+    - Fixed support for regions with loccN/hiccN conditions on more than one
+      MIDI controller.
+
+  * Benchmarks:
+    - Fixed benchmarks/triang.cpp falsely having favoured "int math abs"
+      algorithm (since result of 2nd run was not accumulated).
+    - Added benchmark for saw wave (benchmarks/saw.cpp).
+    - Added benchmark for sine wave (benchmarks/sine.cpp).
+    - Added benchmark for square wave (benchmarks/square.cpp).
+    - Increased amount of benchmarks runs by factor 6 to achieve benchmark times
+      which are large enough on modern systems.
+
+Version 2.1.1 (27 Jul 2019)
+
   * Real-time instrument scripts:
     - Fixed behavior of built-in NKSP functions change_sustain(),
       change_cutoff_attack(), change_cutoff_decay(), change_cutoff_sustain()
@@ -14,6 +269,7 @@ Version SVN trunk (?)
       (see bug #169).
     - LSCP doc: Be more clear describing the two distinct approaches
       of using external vs. internal effects (see bug #169).
+    - "optional" class: Fixed comparison operators.
 
   * Gigasampler/GigaStudio format engine:
     - Format extension: If requested by instrument then don't play release

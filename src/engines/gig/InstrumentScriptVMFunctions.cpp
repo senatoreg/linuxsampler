@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017 Christian Schoenebeck
+ * Copyright (c) 2014-2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -22,7 +22,7 @@ namespace LinuxSampler { namespace gig {
     {
     }
 
-    bool InstrumentScriptVMFunction_gig_set_dim_zone::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_gig_set_dim_zone::acceptsArgType(vmint iArg, ExprType_t type) const {
         return type == INT_EXPR || type == INT_ARR_EXPR;
     }
 
@@ -30,8 +30,8 @@ namespace LinuxSampler { namespace gig {
         EngineChannel* pEngineChannel =
             static_cast<EngineChannel*>(m_vm->m_event->cause.pEngineChannel);
 
-        int dim  = args->arg(1)->asInt()->evalInt();
-        int zone = args->arg(2)->asInt()->evalInt();
+        vmint dim  = args->arg(1)->asInt()->evalInt();
+        vmint zone = args->arg(2)->asInt()->evalInt();
 
         if (args->arg(0)->exprType() == INT_EXPR) {
             const ScriptID id = args->arg(0)->asInt()->evalInt();
@@ -67,7 +67,7 @@ namespace LinuxSampler { namespace gig {
                 baseBits += pRegion->pDimensionDefinitions[i].bits;
             }
             if (idx < 0) {
-                dmsg(2,("gig_set_dim_zone(): no such gig dimension %d\n", dim));
+                dmsg(2,("gig_set_dim_zone(): no such gig dimension %lld\n", dim));
                 return successResult(); // no such dimension found
             }
 
@@ -81,7 +81,7 @@ namespace LinuxSampler { namespace gig {
             dmsg(3,("gig_set_dim_zone(): success, mask=%d bits=%d\n", pNote->Format.Gig.DimMask, pNote->Format.Gig.DimBits));
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -130,8 +130,8 @@ namespace LinuxSampler { namespace gig {
         EngineChannel* pEngineChannel =
             static_cast<EngineChannel*>(m_vm->m_event->cause.pEngineChannel);
 
-        int key1 = args->arg(0)->asInt()->evalInt();
-        int key2 = args->arg(1)->asInt()->evalInt();
+        vmint key1 = args->arg(0)->asInt()->evalInt();
+        vmint key2 = args->arg(1)->asInt()->evalInt();
 
         if (key1 < 0 || key1 > 127) {
             wrnMsg("same_region(): key number for argument 1 out of range");
@@ -142,8 +142,8 @@ namespace LinuxSampler { namespace gig {
             return successResult(-1);
         }
 
-        ::gig::Region* pRgn1 = pEngineChannel->pInstrument->GetRegion(key1);
-        ::gig::Region* pRgn2 = pEngineChannel->pInstrument->GetRegion(key2);
+        ::gig::Region* pRgn1 = pEngineChannel->pInstrument->GetRegion((int)key1);
+        ::gig::Region* pRgn2 = pEngineChannel->pInstrument->GetRegion((int)key2);
 
         if (!pRgn1 && !pRgn2)
             return successResult(5);

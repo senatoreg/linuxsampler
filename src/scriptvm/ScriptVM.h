@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017 Christian Schoenebeck
+ * Copyright (c) 2014-2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -191,7 +191,7 @@ namespace LinuxSampler {
          * This method is re-implemented by deriving classes to add more use
          * case specific built-in variables.
          */
-        std::map<String,VMIntRelPtr*> builtInIntVariables() OVERRIDE;
+        std::map<String,VMIntPtr*> builtInIntVariables() OVERRIDE;
 
         /**
          * Returns all built-in (8 bit) integer array script variables. This
@@ -227,7 +227,25 @@ namespace LinuxSampler {
          * DECLARE_VMINT_READONLY() to define the variable for read-only
          * access by scripts.
          */
-        std::map<String,int> builtInConstIntVariables() OVERRIDE;
+        std::map<String,vmint> builtInConstIntVariables() OVERRIDE;
+
+        /**
+         * Returns all built-in constant real number (floating point) script
+         * variables, which are constant and their final data is already
+         * available at parser time and won't change during runtime. Providing
+         * your built-in constants this way may lead to performance benefits
+         * compared to using other ways of providing built-in variables, because
+         * the script parser can perform optimizations when the script is
+         * refering to such constants.
+         *
+         * This type of built-in variable can only be read, but not be altered
+         * by scripts. This method returns a STL map, where the map's key is
+         * the variable name and the map's value is the final constant data.
+         *
+         * This method is re-implemented by deriving classes to add more use
+         * case specific built-in constant real numbers.
+         */
+        std::map<String,vmfloat> builtInConstRealVariables() OVERRIDE;
 
         /**
          * Returns all built-in dynamic variables. This method returns a STL
@@ -267,6 +285,29 @@ namespace LinuxSampler {
          */
         bool isAutoSuspendEnabled() const;
 
+        /**
+         * By default (i.e. in production use) the built-in exit() function
+         * prohibits any arguments to be passed to its function by scripts. So
+         * by default, scripts trying to pass any arguments to the built-in
+         * exit() function will yield in a parser error.
+         *
+         * By calling this method the built-in exit() function will optionally
+         * accept one argument to be passed to its function call by scripts. The
+         * value of that function argument will become available by calling
+         * VMExecContext::exitResult() after execution of the script.
+         *
+         * @see VMExecContext::exitResult()
+         */
+        void setExitResultEnabled(bool b = true);
+
+        /**
+         * Returns @c true if the built-in exit() function optionally accepts
+         * a function argument by scripts.
+         *
+         * @see setExitResultEnabled()
+         */
+        bool isExitResultEnabled() const;
+
         VMEventHandler* currentVMEventHandler(); //TODO: should be protected (only usable during exec() calls, intended only for VMFunctions)
         VMParserContext* currentVMParserContext(); //TODO: should be protected (only usable during exec() calls, intended only for VMFunctions)
         VMExecContext* currentVMExecContext(); //TODO: should be protected (only usable during exec() calls, intended only for VMFunctions)
@@ -275,6 +316,7 @@ namespace LinuxSampler {
         VMEventHandler* m_eventHandler;
         ParserContext* m_parserContext;
         bool m_autoSuspend;
+        bool m_acceptExitRes;
         class CoreVMFunction_message* m_fnMessage;
         class CoreVMFunction_exit* m_fnExit;
         class CoreVMFunction_wait* m_fnWait;
@@ -291,6 +333,23 @@ namespace LinuxSampler {
         class CoreVMFunction_array_equal* m_fnArrayEqual;
         class CoreVMFunction_search* m_fnSearch;
         class CoreVMFunction_sort* m_fnSort;
+        class CoreVMFunction_int_to_real* m_fnIntToReal;
+        class CoreVMFunction_real_to_int* m_fnRealToInt;
+        class CoreVMFunction_round* m_fnRound;
+        class CoreVMFunction_ceil* m_fnCeil;
+        class CoreVMFunction_floor* m_fnFloor;
+        class CoreVMFunction_sqrt* m_fnSqrt;
+        class CoreVMFunction_log* m_fnLog;
+        class CoreVMFunction_log2* m_fnLog2;
+        class CoreVMFunction_log10* m_fnLog10;
+        class CoreVMFunction_exp* m_fnExp;
+        class CoreVMFunction_pow* m_fnPow;
+        class CoreVMFunction_sin* m_fnSin;
+        class CoreVMFunction_cos* m_fnCos;
+        class CoreVMFunction_tan* m_fnTan;
+        class CoreVMFunction_asin* m_fnAsin;
+        class CoreVMFunction_acos* m_fnAcos;
+        class CoreVMFunction_atan* m_fnAtan;
         class CoreVMDynVar_NKSP_REAL_TIMER* m_varRealTimer;
         class CoreVMDynVar_NKSP_PERF_TIMER* m_varPerfTimer;
     };

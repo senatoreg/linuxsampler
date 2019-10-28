@@ -33,6 +33,22 @@
 
 namespace LinuxSampler { namespace gig {
 
+    // sanity checks: fromGigLfoWave() assumes equally mapped enums
+    static_assert(int64_t(::gig::lfo_wave_sine) == int64_t(LFO::wave_sine),
+                  "enum LFO::wave_t not equally value mapped to libgig's enum ::gig::lfo_wave_t");
+    static_assert(int64_t(::gig::lfo_wave_triangle) == int64_t(LFO::wave_triangle),
+                  "enum LFO::wave_t not equally value mapped to libgig's enum ::gig::lfo_wave_t");
+    static_assert(int64_t(::gig::lfo_wave_saw) == int64_t(LFO::wave_saw),
+                  "enum LFO::wave_t not equally value mapped to libgig's enum ::gig::lfo_wave_t");
+    static_assert(int64_t(::gig::lfo_wave_square) == int64_t(LFO::wave_square),
+                  "enum LFO::wave_t not equally value mapped to libgig's enum ::gig::lfo_wave_t");
+
+    // converts ::gig::lfo_wave_t (libgig) -> LFO::wave_t (LinuxSampler)
+    inline LFO::wave_t fromGigLfoWave(::gig::lfo_wave_t wave) {
+        // simply assuming equally mapped enums on both sides
+        return static_cast<LFO::wave_t>(wave);
+    }
+
     Voice::Voice() {
         pEngine = NULL;
         pEG1 = &EG1;
@@ -273,15 +289,27 @@ namespace LinuxSampler { namespace gig {
                 bLFO1Enabled         = false;
         }
         if (bLFO1Enabled) {
-            pLFO1->trigger(pRegion->LFO1Frequency,
-                           start_level_min,
+            pLFO1->trigger(fromGigLfoWave(pRegion->LFO1WaveForm),
+                           pRegion->LFO1Frequency,
+                           pRegion->LFO1Phase,
+                           LFO::start_level_mid, // see https://sourceforge.net/p/linuxsampler/mailman/linuxsampler-devel/thread/2189307.cNP0Xbctxq%40silver/#msg36774029
                            lfo1_internal_depth,
                            pRegion->LFO1ControlDepth,
                            pRegion->LFO1FlipPhase,
                            pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
             pLFO1->updateByMIDICtrlValue(pLFO1->ExtController ? GetGigEngineChannel()->ControllerTable[pLFO1->ExtController] : 0);
-            pLFO1->setScriptDepthFactor(pNote->Override.AmpLFODepth);
-            pLFO1->setScriptFrequencyFactor(pNote->Override.AmpLFOFreq, pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+            pLFO1->setScriptDepthFactor(
+                pNote->Override.AmpLFODepth.Value,
+                pNote->Override.AmpLFODepth.Final
+            );
+            if (pNote->Override.AmpLFOFreq.isFinal())
+                pLFO1->setScriptFrequencyFinal(
+                    pNote->Override.AmpLFOFreq.Value, pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE
+                );
+            else
+                pLFO1->setScriptFrequencyFactor(
+                    pNote->Override.AmpLFOFreq.Value, pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE
+                );
         }
     }
 
@@ -319,15 +347,23 @@ namespace LinuxSampler { namespace gig {
                 bLFO2Enabled         = false;
         }
         if (bLFO2Enabled) {
-            pLFO2->trigger(pRegion->LFO2Frequency,
-                           start_level_max,
+            pLFO2->trigger(fromGigLfoWave(pRegion->LFO2WaveForm),
+                           pRegion->LFO2Frequency,
+                           pRegion->LFO2Phase,
+                           LFO::start_level_mid, // see https://sourceforge.net/p/linuxsampler/mailman/linuxsampler-devel/thread/2189307.cNP0Xbctxq%40silver/#msg36774029
                            lfo2_internal_depth,
                            pRegion->LFO2ControlDepth,
                            pRegion->LFO2FlipPhase,
                            pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
             pLFO2->updateByMIDICtrlValue(pLFO2->ExtController ? GetGigEngineChannel()->ControllerTable[pLFO2->ExtController] : 0);
-            pLFO2->setScriptDepthFactor(pNote->Override.CutoffLFODepth);
-            pLFO2->setScriptFrequencyFactor(pNote->Override.CutoffLFOFreq, pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+            pLFO2->setScriptDepthFactor(
+                pNote->Override.CutoffLFODepth.Value,
+                pNote->Override.CutoffLFODepth.Final
+            );
+            if (pNote->Override.CutoffLFOFreq.isFinal())
+                pLFO2->setScriptFrequencyFinal(pNote->Override.CutoffLFOFreq.Value, pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+            else
+                pLFO2->setScriptFrequencyFactor(pNote->Override.CutoffLFOFreq.Value, pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
         }
     }
 
@@ -365,15 +401,23 @@ namespace LinuxSampler { namespace gig {
                 bLFO3Enabled         = false;
         }
         if (bLFO3Enabled) {
-            pLFO3->trigger(pRegion->LFO3Frequency,
-                           start_level_mid,
+            pLFO3->trigger(fromGigLfoWave(pRegion->LFO3WaveForm),
+                           pRegion->LFO3Frequency,
+                           pRegion->LFO3Phase,
+                           LFO::start_level_max, // see https://sourceforge.net/p/linuxsampler/mailman/linuxsampler-devel/thread/2189307.cNP0Xbctxq%40silver/#msg36774029
                            lfo3_internal_depth,
                            pRegion->LFO3ControlDepth,
-                           false,
+                           pRegion->LFO3FlipPhase,
                            pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
             pLFO3->updateByMIDICtrlValue(pLFO3->ExtController ? GetGigEngineChannel()->ControllerTable[pLFO3->ExtController] : 0);
-            pLFO3->setScriptDepthFactor(pNote->Override.PitchLFODepth);
-            pLFO3->setScriptFrequencyFactor(pNote->Override.PitchLFOFreq, pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+            pLFO3->setScriptDepthFactor(
+                pNote->Override.PitchLFODepth.Value,
+                pNote->Override.PitchLFODepth.Final
+            );
+            if (pNote->Override.PitchLFOFreq.isFinal())
+                pLFO3->setScriptFrequencyFinal(pNote->Override.PitchLFOFreq.Value, pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+            else
+                pLFO3->setScriptFrequencyFactor(pNote->Override.PitchLFOFreq.Value, pEngine->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
         }
     }
 
@@ -476,13 +520,23 @@ namespace LinuxSampler { namespace gig {
             pRegion->EG1Options.ReleaseCancel
         );
         EG1.trigger(pRegion->EG1PreAttack,
-                    RTMath::Max(pRegion->EG1Attack, 0.0316) * egInfo.Attack,
+                    (pNote && pNote->Override.Attack.isFinal()) ?
+                        pNote->Override.Attack.Value :
+                        RTMath::Max(pRegion->EG1Attack, 0.0316) * egInfo.Attack,
                     pRegion->EG1Hold,
-                    pRegion->EG1Decay1 * egInfo.Decay * velrelease,
-                    pRegion->EG1Decay2 * egInfo.Decay * velrelease,
+                    (pNote && pNote->Override.Decay.isFinal()) ?
+                        pNote->Override.Decay.Value :
+                        pRegion->EG1Decay1 * egInfo.Decay * velrelease,
+                    (pNote && pNote->Override.Decay.isFinal()) ?
+                        pNote->Override.Decay.Value :
+                        pRegion->EG1Decay2 * egInfo.Decay * velrelease,
                     pRegion->EG1InfiniteSustain,
-                    pRegion->EG1Sustain * (pNote ? pNote->Override.Sustain : 1.f),
-                    RTMath::Max(pRegion->EG1Release * velrelease, 0.014) * egInfo.Release,
+                    (pNote && pNote->Override.Sustain.Final) ?
+                        uint(pNote->Override.Sustain.Value * 1000.f) :
+                        pRegion->EG1Sustain * (pNote ? pNote->Override.Sustain.Value : 1.f),
+                    (pNote && pNote->Override.Release.isFinal()) ?
+                        pNote->Override.Release.Value :
+                        RTMath::Max(pRegion->EG1Release * velrelease, 0.014) * egInfo.Release,
                     velocityAttenuation,
                     sampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
     }
@@ -496,13 +550,23 @@ namespace LinuxSampler { namespace gig {
             pRegion->EG2Options.ReleaseCancel
         );
         EG2.trigger(uint(RgnInfo.EG2PreAttack),
-                    RgnInfo.EG2Attack * egInfo.Attack,
+                    (pNote && pNote->Override.CutoffAttack.isFinal()) ?
+                        pNote->Override.CutoffAttack.Value :
+                        RgnInfo.EG2Attack * egInfo.Attack,
                     false,
-                    RgnInfo.EG2Decay1 * egInfo.Decay * velrelease,
-                    RgnInfo.EG2Decay2 * egInfo.Decay * velrelease,
+                    (pNote && pNote->Override.CutoffDecay.isFinal()) ?
+                        pNote->Override.CutoffDecay.Value :
+                        RgnInfo.EG2Decay1 * egInfo.Decay * velrelease,
+                    (pNote && pNote->Override.CutoffDecay.isFinal()) ?
+                        pNote->Override.CutoffDecay.Value :
+                        RgnInfo.EG2Decay2 * egInfo.Decay * velrelease,
                     RgnInfo.EG2InfiniteSustain,
-                    uint(RgnInfo.EG2Sustain),
-                    RgnInfo.EG2Release * egInfo.Release * velrelease,
+                    (pNote && pNote->Override.CutoffSustain.Final) ?
+                        uint(pNote->Override.CutoffSustain.Value * 1000.f) :
+                        uint(RgnInfo.EG2Sustain),
+                    (pNote && pNote->Override.CutoffRelease.isFinal()) ?
+                        pNote->Override.CutoffRelease.Value :
+                        RgnInfo.EG2Release * egInfo.Release * velrelease,
                     velocityAttenuation,
                     sampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
     }

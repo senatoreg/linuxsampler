@@ -2,7 +2,7 @@
  *                                                                         *
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
- *   Copyright (C) 2010 - 2015 Andreas Persson                             *
+ *   Copyright (C) 2010 - 2019 Andreas Persson                             *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -279,13 +279,17 @@ namespace sfz {
         if (nbDimensions) {
             int c = len[nbDimensions - 1];
             for (dim = nbDimensions - 2 ; dim >= 0 ; dim--) {
-                if (dims.size() && dim < dims.size()) {
+                int min;
+                int max;
+                if (dim < dims.size()) {
                     const DimDef& dimDef = dimDefs[dims[dim]];
-                    int max = dimDef.max == -1 ? 127 : dimDef.max;
-                    for (int i = dimDef.min ; i <= max ; i++) mapArr[dim][i] *= c;
+                    min = dimDef.min;
+                    max = dimDef.max == -1 ? 127 : dimDef.max;
                 } else {
-                       for (int i = 0 ; i <= 127 ; i++) mapArr[dim][i] *= c;
+                    min = 0;
+                    max = 127;
                 }
+                for (int i = min ; i <= max ; i++) mapArr[dim][i] *= c;
                 c *= len[dim];
             }
         }

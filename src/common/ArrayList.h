@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- *   Copyright (C) 2005 - 2017 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2019 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -50,7 +50,7 @@ namespace LinuxSampler {
             void add(T element) {
                 T* pNewArray = new T[iSize + 1];
                 if (pData) {
-                    for (int i = 0; i < iSize; i++)
+                    for (ssize_t i = 0; i < iSize; i++)
                         pNewArray[i] = pData[i];
                     delete[] pData;
                 }
@@ -64,13 +64,13 @@ namespace LinuxSampler {
              *
              * @throws Exception - if \a iPosition is out of range
              */
-            void remove(int iPosition) throw (Exception) {
+            void remove(ssize_t iPosition) throw (Exception) {
                 if (iPosition < 0 || iPosition >= iSize)
                     throw Exception("ArrayList::remove(): index out of range");
                 if (iSize == 1) clear();
                 else if (pData) {
                     T* pNewArray = new T[iSize - 1];
-                    for (int iSrc = 0, iDst = 0; iSrc < iSize; iSrc++) {
+                    for (ssize_t iSrc = 0, iDst = 0; iSrc < iSize; iSrc++) {
                         if (iSrc == iPosition) continue;
                         pNewArray[iDst] = pData[iSrc];
                         ++iDst;
@@ -94,10 +94,10 @@ namespace LinuxSampler {
              * Increase or decrease the size of this list to the new amount of
              * elements given by \a cnt.
              */
-            void resize(int cnt) {
+            void resize(ssize_t cnt) {
                 T* pNewArray = new T[cnt];
                 if (pData) {
-                    for (int i = 0; i < cnt; i++)
+                    for (ssize_t i = 0; i < cnt; i++)
                         pNewArray[i] = pData[i];
                     delete[] pData;
                 }
@@ -121,8 +121,8 @@ namespace LinuxSampler {
              *
              * @throws Exception - if \a element could not be found
              */
-            int find(const T& element) {
-                for (int i = 0; i < iSize; i++)
+            ssize_t find(const T& element) {
+                for (ssize_t i = 0; i < iSize; i++)
                     if (pData[i] == element) return i;
                 throw Exception("ArrayList::find(): could not find given element");
             }
@@ -130,7 +130,7 @@ namespace LinuxSampler {
             /**
              * Number of elements currently on the list.
              */
-            inline int size() const {
+            inline ssize_t size() const {
                 return iSize;
             }
 
@@ -144,14 +144,14 @@ namespace LinuxSampler {
             /**
              * Access element at \a iPosition.
              */
-            inline T& operator[](int iPosition) {
+            inline T& operator[](ssize_t iPosition) {
                 return pData[iPosition];
             }
 
             /**
              * Access element at \a iPosition.
              */
-            inline const T& operator[](int iPosition) const {
+            inline const T& operator[](ssize_t iPosition) const {
                 return pData[iPosition];
             }
 
@@ -182,19 +182,19 @@ namespace LinuxSampler {
              * given @a list to this list.
              */
             void copyFlatFrom(const ArrayList& list) {
-                const int n = (size() < list.size()) ? size() : list.size();
+                const ssize_t n = (size() < list.size()) ? size() : list.size();
                 memcpy(pData, list.pData, n * sizeof(T));
             }
 
         private:
-            T*   pData;
-            int  iSize;
+            T*       pData;
+            ssize_t  iSize;
 
             void copy(const ArrayList& list) {
                 iSize = list.iSize;
                 if (list.pData) {
                     pData = new T[iSize];
-                    for (int i = 0 ; i < iSize ; i++) {
+                    for (ssize_t i = 0 ; i < iSize ; i++) {
                         pData[i] = list.pData[i];
                     }
                 } else {
