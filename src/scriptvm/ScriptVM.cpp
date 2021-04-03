@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 - 2019 Christian Schoenebeck
+ * Copyright (c) 2014 - 2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -163,6 +163,8 @@ namespace LinuxSampler {
         m_varPerfTimer = new CoreVMDynVar_NKSP_PERF_TIMER;
         m_fnShLeft = new CoreVMFunction_sh_left;
         m_fnShRight = new CoreVMFunction_sh_right;
+        m_fnMsb = new CoreVMFunction_msb;
+        m_fnLsb = new CoreVMFunction_lsb;
         m_fnMin = new CoreVMFunction_min;
         m_fnMax = new CoreVMFunction_max;
         m_fnArrayEqual = new CoreVMFunction_array_equal;
@@ -199,6 +201,8 @@ namespace LinuxSampler {
         delete m_fnInRange;
         delete m_fnShLeft;
         delete m_fnShRight;
+        delete m_fnMsb;
+        delete m_fnLsb;
         delete m_fnMin;
         delete m_fnMax;
         delete m_fnArrayEqual;
@@ -225,14 +229,75 @@ namespace LinuxSampler {
         delete m_varPerfTimer;
     }
 
-    VMParserContext* ScriptVM::loadScript(const String& s) {
-        std::istringstream iss(s);
-        return loadScript(&iss);
+    VMParserContext* ScriptVM::loadScript(std::istream* is,
+                                          const std::map<String,String>& patchVars,
+                                          std::map<String,String>* patchVarsDef)
+    {
+        std::string s(std::istreambuf_iterator<char>(*is),{});
+        return loadScript(s, patchVars, patchVarsDef);
     }
-    
-    VMParserContext* ScriptVM::loadScript(std::istream* is) {
+
+    VMParserContext* ScriptVM::loadScript(const String& s,
+                                          const std::map<String,String>& patchVars,
+                                          std::map<String,String>* patchVarsDef)
+    {
+        ParserContext* context = (ParserContext*) loadScriptOnePass(s);
+        if (!context->vErrors.empty())
+            return context;
+
+        if (!context->patchVars.empty() && (!patchVars.empty() || patchVarsDef)) {
+            String s2 = s;
+
+            typedef std::pair<String,PatchVarBlock> Var;
+            std::map<int,Var> varsByPos;
+            for (const Var& var : context->patchVars) {
+                const String& name = var.first;
+                const PatchVarBlock& block = var.second;
+                const int pos =
+                    (block.exprBlock) ?
+                        block.exprBlock->firstByte :
+                        block.nameBlock.firstByte + block.nameBlock.lengthBytes;
+                varsByPos[pos] = var;
+                if (patchVarsDef) {
+                    (*patchVarsDef)[name] =
+                        (block.exprBlock) ?
+                            s.substr(pos, block.exprBlock->lengthBytes) : "";
+                }
+            }
+
+            if (patchVars.empty())
+                return context;
+
+            for (std::map<int,Var>::reverse_iterator it = varsByPos.rbegin();
+                 it != varsByPos.rend(); ++it)
+            {
+                const String name = it->second.first;
+                if (patchVars.find(name) != patchVars.end()) {
+                    const int pos = it->first;
+                    const PatchVarBlock& block = it->second.second;
+                    const int length =
+                        (block.exprBlock) ? block.exprBlock->lengthBytes : 0;
+                    String value;
+                    if (!length)
+                        value += " := ";
+                    value += patchVars.find(name)->second;
+                    s2.replace(pos, length, value);
+                }
+            }
+
+            if (s2 != s) {
+                delete context;
+                context = (ParserContext*) loadScriptOnePass(s2);
+            }
+        }
+
+        return context;
+    }
+
+    VMParserContext* ScriptVM::loadScriptOnePass(const String& s) {
         ParserContext* context = new ParserContext(this);
         //printf("parserCtx=0x%lx\n", (uint64_t)context);
+        std::istringstream iss(s);
 
         context->registerBuiltInConstIntVariables( builtInConstIntVariables() );
         context->registerBuiltInConstRealVariables( builtInConstRealVariables() );
@@ -240,13 +305,13 @@ namespace LinuxSampler {
         context->registerBuiltInIntArrayVariables( builtInIntArrayVariables() );
         context->registerBuiltInDynVariables( builtInDynamicVariables() );
 
-        context->createScanner(is);
+        context->createScanner(&iss);
 
         InstrScript_parse(context);
-        dmsg(2,("Allocating %lld bytes of global int VM memory.\n", context->globalIntVarCount * sizeof(vmint)));
-        dmsg(2,("Allocating %lld bytes of global real VM memory.\n", context->globalRealVarCount * sizeof(vmfloat)));
-        dmsg(2,("Allocating %lld bytes of global unit factor VM memory.\n", context->globalUnitFactorCount * sizeof(vmfloat)));
-        dmsg(2,("Allocating %lld of global VM string variables.\n", context->globalStrVarCount));
+        dmsg(2,("Allocating %" PRId64 " bytes of global int VM memory.\n", int64_t(context->globalIntVarCount * sizeof(vmint))));
+        dmsg(2,("Allocating %" PRId64 " bytes of global real VM memory.\n", int64_t(context->globalRealVarCount * sizeof(vmfloat))));
+        dmsg(2,("Allocating %" PRId64 " bytes of global unit factor VM memory.\n", int64_t(context->globalUnitFactorCount * sizeof(vmfloat))));
+        dmsg(2,("Allocating %" PRId64 " of global VM string variables.\n", (int64_t)context->globalStrVarCount));
         if (!context->globalIntMemory)
             context->globalIntMemory = new ArrayList<vmint>();
         if (!context->globalRealMemory)
@@ -299,8 +364,8 @@ namespace LinuxSampler {
                 _requiredMaxStackSizeFor(&*parserCtx->handlers);
         }
         execCtx->stack.resize(parserCtx->requiredMaxStackSize);
-        dmsg(2,("Created VM exec context with %lld bytes VM stack size.\n",
-                parserCtx->requiredMaxStackSize * sizeof(ExecContext::StackFrame)));
+        dmsg(2,("Created VM exec context with %" PRId64 " bytes VM stack size.\n",
+                int64_t(parserCtx->requiredMaxStackSize * sizeof(ExecContext::StackFrame))));
         //printf("execCtx=0x%lx\n", (uint64_t)execCtx);
         const vmint polyIntSize = parserCtx->polyphonicIntVarCount;
         execCtx->polyphonicIntMemory.resize(polyIntSize);
@@ -315,9 +380,9 @@ namespace LinuxSampler {
         for (vmint i = 0; i < polyFactorSize; ++i)
             execCtx->polyphonicUnitFactorMemory[i] = VM_NO_FACTOR;
 
-        dmsg(2,("Allocated %lld bytes polyphonic int memory.\n", polyIntSize * sizeof(vmint)));
-        dmsg(2,("Allocated %lld bytes polyphonic real memory.\n", polyRealSize * sizeof(vmfloat)));
-        dmsg(2,("Allocated %lld bytes unit factor memory.\n", polyFactorSize * sizeof(vmfloat)));
+        dmsg(2,("Allocated %" PRId64 " bytes polyphonic int memory.\n", int64_t(polyIntSize * sizeof(vmint))));
+        dmsg(2,("Allocated %" PRId64 " bytes polyphonic real memory.\n", int64_t(polyRealSize * sizeof(vmfloat))));
+        dmsg(2,("Allocated %" PRId64 " bytes unit factor memory.\n", int64_t(polyFactorSize * sizeof(vmfloat))));
         return execCtx;
     }
 
@@ -355,6 +420,8 @@ namespace LinuxSampler {
         else if (name == "in_range") return m_fnInRange;
         else if (name == "sh_left") return m_fnShLeft;
         else if (name == "sh_right") return m_fnShRight;
+        else if (name == "msb") return m_fnMsb;
+        else if (name == "lsb") return m_fnLsb;
         else if (name == "min") return m_fnMin;
         else if (name == "max") return m_fnMax;
         else if (name == "array_equal") return m_fnArrayEqual;
@@ -417,6 +484,8 @@ namespace LinuxSampler {
         m["$NI_CB_TYPE_NOTE"] = VM_EVENT_HANDLER_NOTE;
         m["$NI_CB_TYPE_RELEASE"] = VM_EVENT_HANDLER_RELEASE;
         m["$NI_CB_TYPE_CONTROLLER"] = VM_EVENT_HANDLER_CONTROLLER;
+        m["$NI_CB_TYPE_RPN"] = VM_EVENT_HANDLER_RPN;
+        m["$NI_CB_TYPE_NRPN"] = VM_EVENT_HANDLER_NRPN;
 
         return m;
     }
@@ -594,6 +663,19 @@ namespace LinuxSampler {
 
                 case STMT_NOOP:
                     break; // no operation like the name suggests
+            }
+
+            if (flags & STMT_RETURN_SIGNALLED) {
+                flags = StmtFlags_t(flags & ~STMT_RETURN_SIGNALLED);
+                for (; frameIdx >= 0; ctx->popStack()) {
+                    frame = ctx->stack[frameIdx];
+                    if (frame.statement->statementType() == STMT_SYNC) {
+                        --synced;
+                    } else if (dynamic_cast<Subroutine*>(frame.statement)) {
+                        ctx->popStack();
+                        break; // stop here
+                    }
+                }
             }
 
             if (flags == STMT_SUCCESS && !synced &&

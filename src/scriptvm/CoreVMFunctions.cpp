@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019 Christian Schoenebeck
+ * Copyright (c) 2014-2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -27,152 +27,243 @@ inline bool _fEqualX(vmfloat a, vmfloat b) {
 }
 
 ///////////////////////////////////////////////////////////////////////////
+// class VMIntResult
+
+VMIntResult::VMIntResult() :
+    flags(STMT_SUCCESS), value(0), unitPrefixFactor(VM_NO_FACTOR),
+    unitBaseType(VM_NO_UNIT)
+{
+}
+
+///////////////////////////////////////////////////////////////////////////
+// class VMRealResult
+
+VMRealResult::VMRealResult() :
+    flags(STMT_SUCCESS), value(0), unitPrefixFactor(VM_NO_FACTOR),
+    unitBaseType(VM_NO_UNIT)
+{
+
+}
+
+///////////////////////////////////////////////////////////////////////////
 // class VMEmptyResultFunction
 
+void VMEmptyResultFunction::bindResult(VMFnResult* res) {
+    result = dynamic_cast<VMEmptyResult*>(res);
+}
+
+VMFnResult* VMEmptyResultFunction::boundResult() const {
+    return result;
+}
+
 VMFnResult* VMEmptyResultFunction::errorResult() {
-    result.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-    return &result;
+    result->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+    return result;
 }
 
 VMFnResult* VMEmptyResultFunction::successResult() {
-    result.flags = STMT_SUCCESS;
-    return &result;
+    result->flags = STMT_SUCCESS;
+    return result;
 }
 
 ///////////////////////////////////////////////////////////////////////////
 // class VMIntResultFunction
 
+void VMIntResultFunction::bindResult(VMFnResult* res) {
+    result = dynamic_cast<VMIntResult*>(res);
+}
+
+VMFnResult* VMIntResultFunction::boundResult() const {
+    return result;
+}
+
 VMFnResult* VMIntResultFunction::errorResult(vmint i) {
-    result.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-    result.value = i;
-    result.unitPrefixFactor = VM_NO_FACTOR;
-    return &result;
+    result->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+    result->value = i;
+    result->unitPrefixFactor = VM_NO_FACTOR;
+    result->unitBaseType = VM_NO_UNIT;
+    return result;
 }
 
 VMFnResult* VMIntResultFunction::successResult(vmint i) {
-    result.flags = STMT_SUCCESS;
-    result.value = i;
-    result.unitPrefixFactor = VM_NO_FACTOR;
-    return &result;
+    result->flags = STMT_SUCCESS;
+    result->value = i;
+    result->unitPrefixFactor = VM_NO_FACTOR;
+    result->unitBaseType = VM_NO_UNIT;
+    return result;
 }
 
 VMFnResult* VMIntResultFunction::errorResult(VMIntFnResDef res) {
-    result.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-    result.value = res.value;
-    result.unitPrefixFactor = res.unitFactor;
-    return &result;
+    result->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+    result->value = res.value;
+    result->unitPrefixFactor = res.unitFactor;
+    result->unitBaseType = VM_NO_UNIT;
+    return result;
 }
 
 VMFnResult* VMIntResultFunction::successResult(VMIntFnResDef res) {
-    result.flags = STMT_SUCCESS;
-    result.value = res.value;
-    result.unitPrefixFactor = res.unitFactor;
-    return &result;
+    result->flags = STMT_SUCCESS;
+    result->value = res.value;
+    result->unitPrefixFactor = res.unitFactor;
+    result->unitBaseType = VM_NO_UNIT;
+    return result;
 }
 
 ///////////////////////////////////////////////////////////////////////////
 // class VMRealResultFunction
 
+void VMRealResultFunction::bindResult(VMFnResult* res) {
+    result = dynamic_cast<VMRealResult*>(res);
+}
+
+VMFnResult* VMRealResultFunction::boundResult() const {
+    return result;
+}
+
 VMFnResult* VMRealResultFunction::errorResult(vmfloat f) {
-    result.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-    result.value = f;
-    result.unitPrefixFactor = VM_NO_FACTOR;
-    return &result;
+    result->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+    result->value = f;
+    result->unitPrefixFactor = VM_NO_FACTOR;
+    result->unitBaseType = VM_NO_UNIT;
+    return result;
 }
 
 VMFnResult* VMRealResultFunction::errorResult(VMRealFnResDef res) {
-    result.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-    result.value = res.value;
-    result.unitPrefixFactor = res.unitFactor;
-    return &result;
+    result->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+    result->value = res.value;
+    result->unitPrefixFactor = res.unitFactor;
+    result->unitBaseType = VM_NO_UNIT;
+    return result;
 }
 
 VMFnResult* VMRealResultFunction::successResult(vmfloat f) {
-    result.flags = STMT_SUCCESS;
-    result.value = f;
-    result.unitPrefixFactor = VM_NO_FACTOR;
-    return &result;
+    result->flags = STMT_SUCCESS;
+    result->value = f;
+    result->unitPrefixFactor = VM_NO_FACTOR;
+    result->unitBaseType = VM_NO_UNIT;
+    return result;
 }
 
 VMFnResult* VMRealResultFunction::successResult(VMRealFnResDef res) {
-    result.flags = STMT_SUCCESS;
-    result.value = res.value;
-    result.unitPrefixFactor = res.unitFactor;
-    return &result;
+    result->flags = STMT_SUCCESS;
+    result->value = res.value;
+    result->unitPrefixFactor = res.unitFactor;
+    result->unitBaseType = VM_NO_UNIT;
+    return result;
 }
 
 ///////////////////////////////////////////////////////////////////////////
 // class VMStringResultFunction
 
+void VMStringResultFunction::bindResult(VMFnResult* res) {
+    result = dynamic_cast<VMStringResult*>(res);
+}
+
+VMFnResult* VMStringResultFunction::boundResult() const {
+    return result;
+}
+
 VMFnResult* VMStringResultFunction::errorResult(const String& s) {
-    result.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-    result.value = s;
-    return &result;
+    result->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+    result->value = s;
+    return result;
 }
 
 VMFnResult* VMStringResultFunction::successResult(const String& s) {
-    result.flags = STMT_SUCCESS;
-    result.value = s;
-    return &result;
+    result->flags = STMT_SUCCESS;
+    result->value = s;
+    return result;
 }
 
 ///////////////////////////////////////////////////////////////////////////
 // class VMNumberResultFunction
 
+VMFnResult* VMNumberResultFunction::allocResult(VMFnArgs* args) {
+    ExprType_t type = returnType(args);
+    if (type == INT_EXPR)
+        return new VMIntResult();
+    if (type == REAL_EXPR)
+        return new VMRealResult();
+    assert(false);
+    return NULL; // just to avoid compiler error, we actually never get here
+}
+
+VMFnResult* VMNumberResultFunction::boundResult() const {
+    if (intResult) return intResult;
+    return realResult;
+}
+
+void VMNumberResultFunction::bindResult(VMFnResult* res) {
+    intResult = dynamic_cast<VMIntResult*>(res);
+    if (intResult) {
+        realResult = NULL;
+        return;
+    }
+    realResult = dynamic_cast<VMRealResult*>(res);
+}
+
 VMFnResult* VMNumberResultFunction::errorResult(vmint i) {
-    intResult.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-    intResult.value = i;
-    intResult.unitPrefixFactor = VM_NO_FACTOR;
-    return &intResult;
+    intResult->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+    intResult->value = i;
+    intResult->unitPrefixFactor = VM_NO_FACTOR;
+    intResult->unitBaseType = VM_NO_UNIT;
+    return intResult;
 }
 
 VMFnResult* VMNumberResultFunction::errorResult(vmfloat f) {
-    realResult.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-    realResult.value = f;
-    realResult.unitPrefixFactor = VM_NO_FACTOR;
-    return &realResult;
+    realResult->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+    realResult->value = f;
+    realResult->unitPrefixFactor = VM_NO_FACTOR;
+    intResult->unitBaseType = VM_NO_UNIT;
+    return realResult;
 }
 
 VMFnResult* VMNumberResultFunction::successResult(vmint i) {
-    intResult.flags = STMT_SUCCESS;
-    intResult.value = i;
-    intResult.unitPrefixFactor = VM_NO_FACTOR;
-    return &intResult;
+    intResult->flags = STMT_SUCCESS;
+    intResult->value = i;
+    intResult->unitPrefixFactor = VM_NO_FACTOR;
+    intResult->unitBaseType = VM_NO_UNIT;
+    return intResult;
 }
 
 VMFnResult* VMNumberResultFunction::successResult(vmfloat f) {
-    realResult.flags = STMT_SUCCESS;
-    realResult.value = f;
-    realResult.unitPrefixFactor = VM_NO_FACTOR;
-    return &realResult;
+    realResult->flags = STMT_SUCCESS;
+    realResult->value = f;
+    realResult->unitPrefixFactor = VM_NO_FACTOR;
+    realResult->unitBaseType = VM_NO_UNIT;
+    return realResult;
 }
 
 VMFnResult* VMNumberResultFunction::errorIntResult(VMIntFnResDef res) {
-    intResult.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-    intResult.value = res.value;
-    intResult.unitPrefixFactor = res.unitFactor;
-    return &intResult;
+    intResult->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+    intResult->value = res.value;
+    intResult->unitPrefixFactor = res.unitFactor;
+    intResult->unitBaseType = VM_NO_UNIT;
+    return intResult;
 }
 
 VMFnResult* VMNumberResultFunction::errorRealResult(VMRealFnResDef res) {
-    realResult.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-    realResult.value = res.value;
-    realResult.unitPrefixFactor = res.unitFactor;
-    return &realResult;
+    realResult->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+    realResult->value = res.value;
+    realResult->unitPrefixFactor = res.unitFactor;
+    realResult->unitBaseType = VM_NO_UNIT;
+    return realResult;
 }
 
 VMFnResult* VMNumberResultFunction::successIntResult(VMIntFnResDef res) {
-    intResult.flags = STMT_SUCCESS;
-    intResult.value = res.value;
-    intResult.unitPrefixFactor = res.unitFactor;
-    return &intResult;
+    intResult->flags = STMT_SUCCESS;
+    intResult->value = res.value;
+    intResult->unitPrefixFactor = res.unitFactor;
+    intResult->unitBaseType = VM_NO_UNIT;
+    return intResult;
 }
 
 VMFnResult* VMNumberResultFunction::successRealResult(VMRealFnResDef res) {
-    realResult.flags = STMT_SUCCESS;
-    realResult.value = res.value;
-    realResult.unitPrefixFactor = res.unitFactor;
-    return &realResult;
+    realResult->flags = STMT_SUCCESS;
+    realResult->value = res.value;
+    realResult->unitPrefixFactor = res.unitFactor;
+    realResult->unitBaseType = VM_NO_UNIT;
+    return realResult;
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -201,7 +292,7 @@ VMFnResult* CoreVMFunction_message::exec(VMFnArgs* args) {
 
     VMIntExpr* intExpr = dynamic_cast<VMIntExpr*>(args->arg(0));
     if (intExpr) {
-        printf("[ScriptVM %.3f] %lld\n", usecs/1000000.f, (int64_t)intExpr->evalInt());
+        printf("[ScriptVM %.3f] %" PRId64 "\n", usecs/1000000.f, (int64_t)intExpr->evalInt());
         return successResult();
     }
 
@@ -235,7 +326,7 @@ bool CoreVMFunction_exit::acceptsArgFinal(vmint iArg) const {
 }
 
 VMFnResult* CoreVMFunction_exit::exec(VMFnArgs* args) {
-    this->result.flags = STMT_ABORT_SIGNALLED;
+    this->result->flags = STMT_RETURN_SIGNALLED;
     if (vm->isExitResultEnabled() && args->argsCount()) {
         ExecContext* ctx = dynamic_cast<ExecContext*>(vm->currentVMExecContext());
         switch (args->arg(0)->exprType()) {
@@ -271,7 +362,7 @@ VMFnResult* CoreVMFunction_exit::exec(VMFnArgs* args) {
                 ; // noop - just to shut up the compiler
         }
     }
-    return &result;
+    return result;
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -295,16 +386,16 @@ VMFnResult* CoreVMFunction_wait::exec(VMFnArgs* args) {
     StdUnit_t unit = expr->unitType();
     vmint us = (unit) ? expr->evalCastInt(VM_MICRO) : expr->evalCastInt();
     if (us < 0) {
-        wrnMsg("wait(): argument may not be negative! Aborting script!");
-        this->result.flags = STMT_ABORT_SIGNALLED;
+        wrnMsg("wait(): argument may not be negative! Aborting handler!");
+        this->result->flags = STMT_ABORT_SIGNALLED;
     } else if (us == 0) {
-        wrnMsg("wait(): argument may not be zero! Aborting script!");
-        this->result.flags = STMT_ABORT_SIGNALLED;
+        wrnMsg("wait(): argument may not be zero! Aborting handler!");
+        this->result->flags = STMT_ABORT_SIGNALLED;
     } else {
         ctx->suspendMicroseconds = us;
-        this->result.flags = STMT_SUSPEND_SIGNALLED;
+        this->result->flags = STMT_SUSPEND_SIGNALLED;
     }
-    return &result;
+    return result;
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -623,6 +714,22 @@ VMFnResult* CoreVMFunction_sh_right::exec(VMFnArgs* args) {
     vmint i = args->arg(0)->asInt()->evalInt();
     vmint n = args->arg(1)->asInt()->evalInt();
     return successResult(i >> n);
+}
+
+///////////////////////////////////////////////////////////////////////////
+// built-in script function:  msb()
+
+VMFnResult* CoreVMFunction_msb::exec(VMFnArgs* args) {
+    vmint i = args->arg(0)->asInt()->evalInt();
+    return successResult((i >> 7) & 127);
+}
+
+///////////////////////////////////////////////////////////////////////////
+// built-in script function:  lsb()
+
+VMFnResult* CoreVMFunction_lsb::exec(VMFnArgs* args) {
+    vmint i = args->arg(0)->asInt()->evalInt();
+    return successResult(i & 127);
 }
 
 ///////////////////////////////////////////////////////////////////////////

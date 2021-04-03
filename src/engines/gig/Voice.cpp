@@ -49,6 +49,17 @@ namespace LinuxSampler { namespace gig {
         return static_cast<LFO::wave_t>(wave);
     }
 
+    // Returns true for GigaStudio's original filter types (which are resembled
+    // by LS very accurately with same frequency response and patch settings
+    // behaviour), false for our own LS specific filter implementation types.
+    constexpr bool isGStFilterType(::gig::vcf_type_t type) {
+        return type == ::gig::vcf_type_lowpass ||
+               type == ::gig::vcf_type_lowpassturbo ||
+               type == ::gig::vcf_type_bandpass ||
+               type == ::gig::vcf_type_highpass ||
+               type == ::gig::vcf_type_bandreject;
+    }
+
     Voice::Voice() {
         pEngine = NULL;
         pEG1 = &EG1;
@@ -153,17 +164,50 @@ namespace LinuxSampler { namespace gig {
         // Not used so far
     }
 
+    uint8_t Voice::MinCutoff() const {
+        // If there's a cutoff controller defined then VCFVelocityScale means
+        // "minimum cutoff". If there is no MIDI controller defined for cutoff
+        // then VCFVelocityScale is already taken into account on libgig side
+        // instead by call to pRegion->GetVelocityCutoff(MIDIKeyVelocity).
+        return pRegion->VCFVelocityScale;
+    }
+
+    // This is called on any cutoff controller changes, however not when the
+    // voice is triggered. So the initial cutoff value is retrieved by a call
+    // to CalculateFinalCutoff() instead.
     void Voice::ProcessCutoffEvent(RTList<Event>::Iterator& itEvent) {
-        int ccvalue = itEvent->Param.CC.Value;
-        if (VCFCutoffCtrl.value == ccvalue) return;
-        VCFCutoffCtrl.value = ccvalue;
-        if (pRegion->VCFCutoffControllerInvert)  ccvalue = 127 - ccvalue;
-        if (ccvalue < pRegion->VCFVelocityScale) ccvalue = pRegion->VCFVelocityScale;
-        float cutoff = CutoffBase * float(ccvalue);
+        if (VCFCutoffCtrl.value == itEvent->Param.CC.Value) return;
+        float ccvalue = VCFCutoffCtrl.value = itEvent->Param.CC.Value;
+
+        // if the selected filter type is an official GigaStudio filter type
+        // then we preserve the original (no matter how odd) historical GSt
+        // behaviour identically; for our own filter types though we deviate to
+        // more meaningful behaviours where appropriate
+        const bool isGStFilter = isGStFilterType(pRegion->VCFType);
+
+        if (pRegion->VCFCutoffControllerInvert) ccvalue = 127 - ccvalue;
+        // interpret "minimum cutoff" not simply as hard limit, rather
+        // restrain it to min_cutoff..127 range, but spanned / remapped over
+        // the entire controller range (0..127) to avoid a "dead" lower
+        // controller zone (that is to avoid a certain CC value range where
+        // the controller would not change the cutoff frequency)
+        ccvalue = MinCutoff() + (ccvalue / 127.f) * float(127 - MinCutoff());
+
+        float cutoff = CutoffBase * ccvalue;
         if (cutoff > 127.0f) cutoff = 127.0f;
 
-        VCFCutoffCtrl.fvalue = cutoff; // needed for initialization of fFinalCutoff next time
-        fFinalCutoff = cutoff;
+        // the filter implementations of the original GSt filter types take an
+        // abstract cutoff parameter range of 0..127, whereas our own filter
+        // types take a cutoff parameter in Hz, so remap here:
+        // 0 .. 127 [lin] -> 21 Hz .. 18 kHz [x^4] (center @2.2 kHz)
+        if (!isGStFilter) {
+            cutoff = (cutoff + 29.f) / (127.f + 29.f);
+            cutoff = cutoff * cutoff * cutoff * cutoff * 18000.f;
+            if (cutoff > 0.49f * pEngine->SampleRate)
+                cutoff = 0.49f * pEngine->SampleRate;
+        }
+
+        fFinalCutoff = VCFCutoffCtrl.fvalue = cutoff;
     }
 
     double Voice::CalculateCrossfadeVolume(uint8_t MIDIKeyVelocity) {
@@ -429,20 +473,54 @@ namespace LinuxSampler { namespace gig {
         return cutoff;
     }
 
+    // This is just called when the voice is triggered. On any subsequent cutoff
+    // controller changes ProcessCutoffEvent() is called instead.
     float Voice::CalculateFinalCutoff(float cutoffBase) {
-        int cvalue;
+        // if the selected filter type is an official GigaStudio filter type
+        // then we preserve the original (no matter how odd) historical GSt
+        // behaviour identically; for our own filter types though we deviate to
+        // more meaningful behaviours where appropriate
+        const bool isGStFilter = isGStFilterType(pRegion->VCFType);
+
+        // get current cutoff CC or velocity value (always 0..127)
+        float cvalue;
         if (VCFCutoffCtrl.controller) {
             cvalue = GetGigEngineChannel()->ControllerTable[VCFCutoffCtrl.controller];
             if (pRegion->VCFCutoffControllerInvert) cvalue = 127 - cvalue;
-            // VCFVelocityScale in this case means Minimum cutoff
-            if (cvalue < pRegion->VCFVelocityScale) cvalue = pRegion->VCFVelocityScale;
-        }
-        else {
+            if (isGStFilter) {
+                // VCFVelocityScale in this case means "minimum cutoff" for GSt
+                if (cvalue < MinCutoff()) cvalue = MinCutoff();
+            } else {
+                // for our own filter types we interpret "minimum cutoff"
+                // differently: GSt handles this as a simple hard limit with the
+                // consequence that a certain range of the controller is simply
+                // dead; so for our filter types we rather remap that to
+                // restrain within the min_cutoff..127 range as well, but
+                // effectively spanned over the entire controller range (0..127)
+                // to avoid such a "dead" lower controller zone
+                cvalue = MinCutoff() + (cvalue / 127.f) * float(127 - MinCutoff());
+            }
+        } else {
+            // in case of velocity, VCFVelocityScale parameter is already
+            // handled on libgig side (so by calling
+            // pRegion->GetVelocityCutoff(velo) in CalculateCutoffBase() above)
             cvalue = pRegion->VCFCutoff;
         }
-        float fco = cutoffBase * float(cvalue);
+
+        float fco = cutoffBase * cvalue;
         if (fco > 127.0f) fco = 127.0f;
 
+        // the filter implementations of the original GSt filter types take an
+        // abstract cutoff parameter range of 0..127, ...
+        if (isGStFilter)
+            return fco;
+
+        // ... whereas our own filter types take a cutoff parameter in Hz, so
+        // remap here 0 .. 127 [lin] -> 21 Hz .. 18 kHz [x^4] (center @2.2 kHz)
+        fco = (fco + 29.f) / (127.f + 29.f);
+        fco = fco * fco * fco * fco * 18000.f;
+        if (fco > 0.49f * pEngine->SampleRate)
+            fco = 0.49f * pEngine->SampleRate;
         return fco;
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019 Christian Schoenebeck
+ * Copyright (c) 2014-2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -193,6 +193,12 @@ namespace LinuxSampler {
     }
 
     ///////////////////////////////////////////////////////////////////////
+    // class 'VMFnResult'
+
+    VMFnResult::~VMFnResult() {
+    }
+
+    ///////////////////////////////////////////////////////////////////////
     // class 'VMSourceToken'
 
     VMSourceToken::VMSourceToken() : m_token(NULL) {
@@ -234,6 +240,14 @@ namespace LinuxSampler {
 
     int VMSourceToken::firstColumn() const {
         return (m_token) ? m_token->firstColumn() : 0;
+    }
+
+    int VMSourceToken::firstByte() const {
+        return (m_token) ? m_token->firstByte() : 0;
+    }
+
+    int VMSourceToken::lengthBytes() const {
+        return (m_token) ? m_token->lengthBytes() : 0;
     }
 
     bool VMSourceToken::isEOF() const {

@@ -3,7 +3,7 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003, 2004 by Benno Senoner and Christian Schoenebeck   *
- *   Copyright (C) 2005 - 2016 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2020 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -1478,6 +1478,13 @@ static bool yyValid(std::vector<YYTYPE_INT16>& stack, char ch);
  * memory stack size in modern devices, it should be fine though.
  */
 typedef std::set< std::vector<YYTYPE_INT16> > YYStackHistory;
+
+/*
+ * YYTERROR macro was removed in Bison 3.6.0, we need it in function below.
+ */
+#ifndef YYTERROR
+# define YYTERROR YYSYMBOL_YYerror
+#endif
 
 #define DEBUG_BISON_SYNTAX_ERROR_WALKER 0
 

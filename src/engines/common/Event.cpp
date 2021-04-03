@@ -3,7 +3,7 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003, 2004 by Benno Senoner and Christian Schoenebeck   *
- *   Copyright (C) 2005 - 2017 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2021 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -206,6 +206,7 @@ namespace LinuxSampler {
         e->currentHandler = 0;
         e->executionSlices = 0;
         e->ignoreAllWaitCalls = ignoreAllWaitCalls;
+        e->releaseMatched = true; // this is not the original: never match a release handler with a forked note handler instance
         e->handlerType = handlerType;
         e->parentHandlerID = 0; // just an arbitrary init value, must still be set later!
         e->childHandlerID[0] = 0;

@@ -49,9 +49,7 @@ int ConditionTest::ConditionCheckerLocking::Main() {
     resource++;
     while (!doUnlock) {
 		usleep(1000); // sleep until ordered to unlock the condition again
-#if CONFIG_PTHREAD_TESTCANCEL
 		TestCancel();
-#endif
 	}
     staticcondition.Unlock();
     return 0;
@@ -85,6 +83,11 @@ void ConditionTest::testBlocksIfNotDesiredCondition() {
     t.SignalStartThread();
     usleep(400000); // wait 400ms
     CPPUNIT_ASSERT(t.resource == 0);
+    if (t.resource == 0) {
+        // test is done; set condition to avoid this test suite to deadlock here
+        t.condition.Set(true);
+    }
+    usleep(100000); // give thread some time (100ms) to terminate cleanly
 }
 
 // Check if Condition class blocks until desired condition is reached

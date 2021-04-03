@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 - 2019 Christian Schoenebeck
+ * Copyright (c) 2014 - 2021 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -116,11 +116,18 @@ namespace LinuxSampler {
          * @param count - amount of elements to be removed
          */
         inline void remove(size_t index, size_t count = 1) {
-            if (index >= m_size || index + count > m_size)
+            if (index >= m_size)
                 return;
+            // special case: no elements behind the removed elements, so nothing
+            // to move
+            if (index + count >= m_size) {
+                m_size = index;
+                return;
+            }
             // don't use memmove() here! Since it is not RT safe with all libc
             // implementations and on all architectures
-            for (size_t i = 0; i < count; ++i)
+            const size_t n = m_size - index - count;
+            for (size_t i = 0; i < n; ++i)
                 m_data[index + i] = m_data[index + i + count];
             m_size -= count;
         }

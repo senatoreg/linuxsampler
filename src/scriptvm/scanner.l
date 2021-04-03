@@ -21,7 +21,10 @@
     yylloc->first_line = yylineno;      \
     yylloc->last_line  = yylineno;      \
     yylloc->first_column = yycolumn;    \
+    yylloc->first_byte = yyextra->nbytes; \
+    yylloc->length_bytes = (int) yyleng;  \
     yycolumn += yyleng;                 \
+    yyextra->nbytes += (int) yyleng;    \
     yylloc->last_column = yycolumn - 1; \
     /*printf("lex: line '%s'\n", yytext);*/  \
 }
@@ -38,11 +41,15 @@
 }
 
 static void scanner_error(YYLTYPE* locp, LinuxSampler::ParserContext* context, const char* err) {
-    context->addErr(locp->first_line, locp->last_line, locp->first_column, locp->last_column, err);
+    context->addErr(locp->first_line, locp->last_line, locp->first_column,
+                    locp->last_column, locp->first_byte, locp->length_bytes,
+                    err);
 }
 
 static void scanner_warning(YYLTYPE* locp, LinuxSampler::ParserContext* context, const char* txt) {
-    context->addWrn(locp->first_line, locp->last_line, locp->first_column, locp->last_column, txt);
+    context->addWrn(locp->first_line, locp->last_line, locp->first_column,
+                    locp->last_column, locp->first_byte, locp->length_bytes,
+                    txt);
 }
 
 #define SCANNER_ERR(txt)  scanner_error(yylloc, yyextra, txt)
@@ -115,8 +122,10 @@ UNIT     (s|(Hz)|B)
 %%
 
 \"[^"]*\" {
-    yylval->sValue = strdup(yytext + 1);
-    yylval->sValue[strlen(yylval->sValue) - 1] = '\0';
+    char* s = strdup(yytext + 1);
+    s[strlen(s) - 1] = '\0';
+    yylval->sValue = s;
+    yyextra->autoFreeAfterParse(s);
     return STRING;
 }
 
@@ -333,7 +342,8 @@ UNIT     (s|(Hz)|B)
 <PREPROC_BODY_EAT>.* { /* eat up code block filtered out by preprocessor */
     //printf("PREPROCESSOR EAT3 : {%s}\n", yytext);
     yyextra->addPreprocessorComment(yylloc->first_line, yylloc->last_line,
-                                    yylloc->first_column+1, yylloc->last_column+1);
+                                    yylloc->first_column+1, yylloc->last_column+1,
+                                    yylloc->first_byte, yylloc->length_bytes);
 }
 
 
@@ -355,6 +365,8 @@ UNIT     (s|(Hz)|B)
 "not" return NOT;
 "else" return ELSE;
 "controller" return CONTROLLER;
+"rpn" return RPN;
+"nrpn" return NRPN;
 "case" return CASE;
 "select" return SELECT;
 "to" return TO;
@@ -362,6 +374,7 @@ UNIT     (s|(Hz)|B)
 ">=" return GE;
 "const" return CONST_; // note: "CONST" is already defined for C/C++ compilers on Windows by default
 "polyphonic" return POLYPHONIC;
+"patch" return PATCH;
 "mod" return MOD;
 "function" return FUNCTION;
 "call" return CALL;
@@ -373,11 +386,13 @@ UNIT     (s|(Hz)|B)
 
 ("$"|"@"|"%"|"~"|"?"){ID} {
     yylval->sValue = strdup(yytext);
+    yyextra->autoFreeAfterParse(yylval->sValue);
     return VARIABLE;
 }
 
 {ID} {
     yylval->sValue = strdup(yytext);
+    yyextra->autoFreeAfterParse(yylval->sValue);
     return IDENTIFIER;
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019 Christian Schoenebeck
+ * Copyright (c) 2014-2021 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -84,7 +84,8 @@ namespace LinuxSampler {
        STMT_SUCCESS = 0, ///< Function / statement was executed successfully, no error occurred.
        STMT_ABORT_SIGNALLED = 1, ///< VM should stop the current callback execution (usually because of an error, but might also be without an error reason, i.e. when the built-in script function exit() was called).
        STMT_SUSPEND_SIGNALLED = (1<<1), ///< VM supended execution, either because the script called the built-in wait() script function or because the script consumed too much execution time and was forced by the VM to be suspended for some time
-       STMT_ERROR_OCCURRED = (1<<2), ///< VM stopped execution due to some script runtime error that occurred 
+       STMT_ERROR_OCCURRED = (1<<2), ///< VM stopped execution due to some script runtime error that occurred
+       STMT_RETURN_SIGNALLED = (1<<3), ///< VM should unwind stack and return to previous, calling subroutine (i.e. user function or event handler).
     };
 
     /** @brief Virtual machine execution status.
@@ -120,6 +121,8 @@ namespace LinuxSampler {
         VM_EVENT_HANDLER_NOTE, ///< Note event handler, that is script's "on note ... end on" code block.
         VM_EVENT_HANDLER_RELEASE, ///< Release event handler, that is script's "on release ... end on" code block.
         VM_EVENT_HANDLER_CONTROLLER, ///< Controller event handler, that is script's "on controller ... end on" code block.
+        VM_EVENT_HANDLER_RPN, ///< RPN event handler, that is script's "on rpn ... end on" code block.
+        VM_EVENT_HANDLER_NRPN, ///< NRPN event handler, that is script's "on nrpn ... end on" code block.
     };
 
     /**
@@ -815,6 +818,8 @@ namespace LinuxSampler {
      */
     class VMFnResult {
     public:
+        virtual ~VMFnResult();
+
         /**
          * Returns the result value of the function call, represented by a high
          * level expression object.
@@ -1055,11 +1060,49 @@ namespace LinuxSampler {
                                std::function<void(String)> err,
                                std::function<void(String)> wrn);
 
-        /**
+        /** @brief Allocate storage location for function's result value.
+         *
+         * This method is invoked at parse time to allocate object(s) suitable
+         * to store a result value returned after executing this function
+         * implementation. Function implementation returns an instance of some
+         * type (being subclass of @c VMFnArgs) which allows it to store its
+         * result value to appropriately. Life time of the returned object is
+         * controlled by caller which will call delete on returned object once
+         * it no longer needs the storage location anymore (usually when script
+         * is unloaded).
+         *
+         * @param args - function arguments for executing this built-in function
+         * @returns storage location for storing a result value of this function
+         */
+        virtual VMFnResult* allocResult(VMFnArgs* args) = 0;
+
+        /** @brief Bind storage location for a result value to this function.
+         *
+         * This method is called to tell this function implementation where it
+         * shall store its result value to when @c exec() is called
+         * subsequently.
+         *
+         * @param res - storage location for a result value, previously
+         *              allocated by calling @c allocResult()
+         */
+        virtual void bindResult(VMFnResult* res) = 0;
+
+        /** @brief Current storage location bound to this function for result.
+         *
+         * Returns storage location currently being bound for result value of
+         * this function.
+         */
+        virtual VMFnResult* boundResult() const = 0;
+
+        /** @brief Execute this function.
+         *
          * Implements the actual function execution. This exec() method is
          * called by the VM whenever this function implementation shall be
          * executed at script runtime. This method blocks until the function
          * call completed.
+         *
+         * @remarks The actual storage location for returning a result value is
+         * assigned by calling @c bindResult() before invoking @c exec().
          *
          * @param args - function arguments for executing this built-in function
          * @returns function's return value (if any) and general status
@@ -1135,7 +1178,7 @@ namespace LinuxSampler {
      *
      * Refer to DECLARE_VMINT() for example code.
      *
-     * @see VMInt32RelPtr, VMInt8RelPtr, DECLARE_VMINT()
+     * @see VMInt32RelPtr, VMInt16RelPtr, VMInt8RelPtr, DECLARE_VMINT()
      */
     struct VMInt64RelPtr : VMRelPtr, VMIntPtr {
         VMInt64RelPtr() {
@@ -1177,7 +1220,7 @@ namespace LinuxSampler {
      *
      * Refer to DECLARE_VMINT() for example code.
      *
-     * @see VMInt64RelPtr, VMInt8RelPtr, DECLARE_VMINT()
+     * @see VMInt64RelPtr, VMInt16RelPtr, VMInt8RelPtr, DECLARE_VMINT()
      */
     struct VMInt32RelPtr : VMRelPtr, VMIntPtr {
         VMInt32RelPtr() {
@@ -1195,6 +1238,48 @@ namespace LinuxSampler {
         }
         void assign(vmint i) OVERRIDE {
             *(int32_t*)&(*(uint8_t**)base)[offset] = (int32_t)i;
+        }
+        bool isAssignable() const OVERRIDE { return !readonly; }
+    };
+
+    /** @brief Pointer to built-in VM integer variable (of C/C++ type int16_t).
+     *
+     * Used for defining built-in 16 bit integer script variables.
+     *
+     * @b CAUTION: You may only use this class for pointing to C/C++ variables
+     * of type "int16_t" (thus being exactly 16 bit in size). If the C/C++ int
+     * variable you want to reference is 64 bit in size then you @b must use
+     * VMInt64RelPtr instead! Respectively for a referenced native variable with
+     * only 8 bit in size you @b must use VMInt8RelPtr instead!
+     *
+     * For efficiency reasons the actual native C/C++ int variable is referenced
+     * by two components here. The actual native int C/C++ variable in memory
+     * is dereferenced at VM run-time by taking the @c base pointer dereference
+     * and adding @c offset bytes. This has the advantage that for a large
+     * number of built-in int variables, only one (or few) base pointer need
+     * to be re-assigned before running a script, instead of updating each
+     * built-in variable each time before a script is executed.
+     *
+     * Refer to DECLARE_VMINT() for example code.
+     *
+     * @see VMInt64RelPtr, VMInt32RelPtr, VMInt8RelPtr, DECLARE_VMINT()
+     */
+    struct VMInt16RelPtr : VMRelPtr, VMIntPtr {
+        VMInt16RelPtr() {
+            base   = NULL;
+            offset = 0;
+            readonly = false;
+        }
+        VMInt16RelPtr(const VMRelPtr& data) {
+            base   = data.base;
+            offset = data.offset;
+            readonly = false;
+        }
+        vmint evalInt() OVERRIDE {
+            return (vmint)*(int16_t*)&(*(uint8_t**)base)[offset];
+        }
+        void assign(vmint i) OVERRIDE {
+            *(int16_t*)&(*(uint8_t**)base)[offset] = (int16_t)i;
         }
         bool isAssignable() const OVERRIDE { return !readonly; }
     };
@@ -1219,7 +1304,7 @@ namespace LinuxSampler {
      *
      * Refer to DECLARE_VMINT() for example code.
      *
-     * @see VMIntRel32Ptr, VMIntRel64Ptr, DECLARE_VMINT()
+     * @see VMInt16RelPtr, VMIntRel32Ptr, VMIntRel64Ptr, DECLARE_VMINT()
      */
     struct VMInt8RelPtr : VMRelPtr, VMIntPtr {
         VMInt8RelPtr() {
@@ -1262,8 +1347,8 @@ namespace LinuxSampler {
     #endif
 
     /**
-     * Convenience macro for initializing VMInt64RelPtr, VMInt32RelPtr and
-     * VMInt8RelPtr structures. Usage example:
+     * Convenience macro for initializing VMInt64RelPtr, VMInt32RelPtr,
+     * VMInt16RelPtr and VMInt8RelPtr structures. Usage example:
      * @code
      * struct Foo {
      *   uint8_t a; // native representation of a built-in integer script variable
@@ -1316,9 +1401,10 @@ namespace LinuxSampler {
 
     /**
      * Same as DECLARE_VMINT(), but this one defines the VMInt64RelPtr,
-     * VMInt32RelPtr and VMInt8RelPtr structures to be of read-only type.
-     * That means the script parser will abort any script at parser time if the
-     * script is trying to modify such a read-only built-in variable.
+     * VMInt32RelPtr, VMInt16RelPtr and VMInt8RelPtr structures to be of
+     * read-only type. That means the script parser will abort any script at
+     * parser time if the script is trying to modify such a read-only built-in
+     * variable.
      *
      * @b NOTE: this is only intended for built-in read-only variables that
      * may change during runtime! If your built-in variable's data is rather
@@ -1597,6 +1683,14 @@ namespace LinuxSampler {
         virtual void resetPolyphonicData() = 0;
 
         /**
+         * Copies all polyphonic variables from the passed source object to this
+         * destination object.
+         *
+         * @param ectx - source object to be copied from
+         */
+        virtual void copyPolyphonicDataFrom(VMExecContext* ectx) = 0;
+
+        /**
          * Returns amount of virtual machine instructions which have been
          * performed the last time when this execution context was executing a
          * script. So in case you need the overall amount of instructions
@@ -1689,6 +1783,8 @@ namespace LinuxSampler {
         int lastLine; ///< The last line number of this code block within the script.
         int firstColumn; ///< The first column of this code block within the script (indexed with 1 being the very first column).
         int lastColumn; ///< The last column of this code block within the script.
+        int firstByte; ///< The first byte of this code block within the script.
+        int lengthBytes; ///< Length of this code block within the script (in bytes).
     };
 
     /**
@@ -1866,6 +1962,8 @@ namespace LinuxSampler {
         // position of token in script
         int firstLine() const; ///< First line this source token is located at in script source code (indexed with 0 being the very first line). Most source code tokens are not spanning over multiple lines, the only current exception are comments, in the latter case you need to process text() to get the last line and last column for the comment.
         int firstColumn() const; ///< First column on the first line this source token is located at in script source code (indexed with 0 being the very first column). To get the length of this token use text().length().
+        int firstByte() const; ///< First raw byte position of this source token in script source code.
+        int lengthBytes() const; ///< Raw byte length of this source token (in bytes).
 
         // base types
         bool isEOF() const; ///< Returns true in case this source token represents the end of the source code file.

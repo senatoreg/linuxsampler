@@ -13,6 +13,7 @@
 #include "../common/global_private.h"
 #include "../common/RTMath.h"
 #include <assert.h>
+#include "CoreVMFunctions.h" // for VMIntResult, VMRealResult
 
 namespace LinuxSampler {
     
@@ -122,7 +123,7 @@ static String _unitFactorToShortStr(vmfloat unitFactor) {
     }
 }
 
-static String _unitToStr(Unit* unit) {
+static String _unitToStr(VMUnit* unit) {
     const StdUnit_t type = unit->unitType();
     String sType;
     switch (type) {
@@ -188,7 +189,7 @@ vmint IntLiteral::evalInt() {
 
 void IntLiteral::dump(int level) {
     printIndents(level);
-    printf("IntLiteral %lld\n", value);
+    printf("IntLiteral %" PRId64 "\n", (int64_t)value);
 }
 
 RealLiteral::RealLiteral(const RealLitDef& def) :
@@ -500,15 +501,33 @@ StmtFlags_t Assignment::exec() {
     return STMT_SUCCESS;
 }
 
-EventHandler::EventHandler(StatementsRef statements) {
+Subroutine::Subroutine(StatementsRef statements) {
     this->statements = statements;
+}
+
+void Subroutine::dump(int level) {
+    printIndents(level);
+    printf("Subroutine {\n");
+    statements->dump(level+1);
+    printIndents(level);
+    printf("}\n");
+}
+
+UserFunction::UserFunction(StatementsRef statements)
+    : Subroutine(statements)
+{
+}
+
+EventHandler::EventHandler(StatementsRef statements)
+    : Subroutine(statements)
+{
     usingPolyphonics = statements->isPolyphonic();
 }
 
 void EventHandler::dump(int level) {
     printIndents(level);
     printf("EventHandler {\n");
-    statements->dump(level+1);
+    Subroutine::dump(level+1);
     printIndents(level);
     printf("}\n");
 }
@@ -575,8 +594,16 @@ FunctionCall::FunctionCall(const char* function, ArgsRef args, VMFunction* fn) :
     Unit(
         (fn) ? fn->returnUnitType(dynamic_cast<VMFnArgs*>(&*args)) : VM_NO_UNIT
     ),
-    functionName(function), args(args), fn(fn), result(NULL)
+    functionName(function), args(args), fn(fn),
+    result( (fn) ? fn->allocResult(dynamic_cast<VMFnArgs*>(&*args)) : NULL )
 {
+}
+
+FunctionCall::~FunctionCall() {
+    if (result) {
+        delete result;
+        result = NULL;
+    }
 }
 
 void FunctionCall::dump(int level) {
@@ -610,20 +637,51 @@ bool FunctionCall::isFinal() const {
 
 VMFnResult* FunctionCall::execVMFn() {
     if (!fn) return NULL;
+
+    // tell function where it shall dump its return value to
+    VMFnResult* oldRes = fn->boundResult();
+    fn->bindResult(result);
+
     // assuming here that all argument checks (amount and types) have been made
     // at parse time, to avoid time intensive checks on each function call
-    return fn->exec(dynamic_cast<VMFnArgs*>(&*args));
+    VMFnResult* res = fn->exec(dynamic_cast<VMFnArgs*>(&*args));
+
+    // restore previous result binding of some potential toplevel or concurrent
+    // caller, i.e. if exactly same function is called more than one time,
+    // concurrently in a term by other FunctionCall objects, e.g.:
+    // ~c := ceil( ceil(~a) + ~b)
+    fn->bindResult(oldRes);
+
+    if (!res) return res;
+
+    VMExpr* expr = res->resultValue();
+    if (!expr) return res;
+
+    // For performance reasons we always only let 'FunctionCall' assign the unit
+    // type to the function's result expression, never by the function
+    // implementation itself, nor by other classes, because a FunctionCall
+    // object solely knows the unit type in O(1).
+    ExprType_t type = expr->exprType();
+    if (type == INT_EXPR) {
+        VMIntResult* intRes = dynamic_cast<VMIntResult*>(res);
+        intRes->unitBaseType = unitType();
+    } else if (type == REAL_EXPR) {
+        VMRealResult* realRes = dynamic_cast<VMRealResult*>(res);
+        realRes->unitBaseType = unitType();
+    }
+
+    return res;
 }
 
 StmtFlags_t FunctionCall::exec() {
-    result = execVMFn();
+    VMFnResult* result = execVMFn();
     if (!result)
         return StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
     return result->resultFlags();
 }
 
 vmint FunctionCall::evalInt() {
-    result = execVMFn();
+    VMFnResult* result = execVMFn();
     if (!result) return 0;
     VMIntExpr* intExpr = dynamic_cast<VMIntExpr*>(result->resultValue());
     if (!intExpr) return 0;
@@ -631,27 +689,60 @@ vmint FunctionCall::evalInt() {
 }
 
 vmfloat FunctionCall::evalReal() {
-    result = execVMFn();
+    VMFnResult* result = execVMFn();
     if (!result) return 0;
     VMRealExpr* realExpr = dynamic_cast<VMRealExpr*>(result->resultValue());
     if (!realExpr) return 0;
     return realExpr->evalReal();
 }
 
+vmint FunctionCall::arraySize() const {
+    //FIXME: arraySize() not intended for evaluation semantics (for both
+    // performance reasons with arrays, but also to prevent undesired value
+    // mutation by implied (hidden) evaluation, as actually done here. We must
+    // force function evaluation here though, because we need it for function
+    // calls to be evaluated at all. This issue should be addressed cleanly by
+    // adjusting the API appropriately.
+    FunctionCall* rwSelf = const_cast<FunctionCall*>(this);
+    VMFnResult* result = rwSelf->execVMFn();
+
+    if (!result) return 0;
+    VMArrayExpr* arrayExpr = dynamic_cast<VMArrayExpr*>(result->resultValue());
+    return arrayExpr->arraySize();
+}
+
 VMIntArrayExpr* FunctionCall::asIntArray() const {
+    //FIXME: asIntArray() not intended for evaluation semantics (for both
+    // performance reasons with arrays, but also to prevent undesired value
+    // mutation by implied (hidden) evaluation, as actually done here. We must
+    // force function evaluation here though, because we need it for function
+    // calls to be evaluated at all. This issue should be addressed cleanly by
+    // adjusting the API appropriately.
+    FunctionCall* rwSelf = const_cast<FunctionCall*>(this);
+    VMFnResult* result = rwSelf->execVMFn();
+
     if (!result) return 0;
     VMIntArrayExpr* intArrExpr = dynamic_cast<VMIntArrayExpr*>(result->resultValue());
     return intArrExpr;
 }
 
 VMRealArrayExpr* FunctionCall::asRealArray() const {
+    //FIXME: asRealArray() not intended for evaluation semantics (for both
+    // performance reasons with arrays, but also to prevent undesired value
+    // mutation by implied (hidden) evaluation, as actually done here. We must
+    // force function evaluation here though, because we need it for function
+    // calls to be evaluated at all. This issue should be addressed cleanly by
+    // adjusting the API appropriately.
+    FunctionCall* rwSelf = const_cast<FunctionCall*>(this);
+    VMFnResult* result = rwSelf->execVMFn();
+
     if (!result) return 0;
     VMRealArrayExpr* realArrExpr = dynamic_cast<VMRealArrayExpr*>(result->resultValue());
     return realArrExpr;
 }
 
 String FunctionCall::evalStr() {
-    result = execVMFn();
+    VMFnResult* result = execVMFn();
     if (!result) return "";
     VMStringExpr* strExpr = dynamic_cast<VMStringExpr*>(result->resultValue());
     if (!strExpr) return "";
@@ -659,7 +750,7 @@ String FunctionCall::evalStr() {
 }
 
 String FunctionCall::evalCastToStr() {
-    result = execVMFn();
+    VMFnResult* result = execVMFn();
     if (!result) return "";
     const ExprType_t resultType = result->resultValue()->exprType();
     if (resultType == STRING_EXPR) {
@@ -667,10 +758,10 @@ String FunctionCall::evalCastToStr() {
         return strExpr ? strExpr->evalStr() : "";
     } else if (resultType == REAL_EXPR) {
         VMRealExpr* realExpr = dynamic_cast<VMRealExpr*>(result->resultValue());
-        return realExpr ? ToString(realExpr->evalReal()) : "";
+        return realExpr ? ToString(realExpr->evalReal()) + _unitToStr(realExpr) : "";
     } else {
         VMIntExpr* intExpr = dynamic_cast<VMIntExpr*>(result->resultValue());
-        return intExpr ? ToString(intExpr->evalInt()) : "";
+        return intExpr ? ToString(intExpr->evalInt()) + _unitToStr(intExpr) : "";
     }
 }
 
@@ -845,7 +936,7 @@ vmint ConstIntVariable::evalInt() {
 
 void ConstIntVariable::dump(int level) {
     printIndents(level);
-    printf("ConstIntVariable val=%lld\n", value);
+    printf("ConstIntVariable val=%" PRId64 "\n", (int64_t)value);
 }
 
 ConstRealVariable::ConstRealVariable(const RealVarDef& def) :
@@ -988,7 +1079,14 @@ IntArrayVariable::IntArrayVariable(ParserContext* ctx, vmint size,
         if (expr) {
             this->values[i] = expr->evalInt();
             this->unitFactors[i] = expr->unitFactor();
+        } else {
+            this->values[i] = 0;
+            this->unitFactors[i] = VM_NO_FACTOR;
         }
+    }
+    for (vmint i = values->argsCount(); i < size; ++i) {
+        this->values[i] = 0;
+        this->unitFactors[i] = VM_NO_FACTOR;
     }
 }
 
@@ -1034,7 +1132,7 @@ void IntArrayVariable::dump(int level) {
             printf("\n");
             printIndents(level+1);
         }
-        printf("%lld, ", values[i]);
+        printf("%" PRId64 ", ", (int64_t)values[i]);
     }
     printIndents(level);
     printf(")\n");
@@ -1080,7 +1178,14 @@ RealArrayVariable::RealArrayVariable(ParserContext* ctx, vmint size,
         if (expr) {
             this->values[i] = expr->evalReal();
             this->unitFactors[i] = expr->unitFactor();
+        } else {
+            this->values[i] = (vmfloat) 0;
+            this->unitFactors[i] = VM_NO_FACTOR;
         }
+    }
+    for (vmint i = values->argsCount(); i < size; ++i) {
+        this->values[i] = (vmfloat) 0;
+        this->unitFactors[i] = VM_NO_FACTOR;
     }
 }
 
@@ -1285,7 +1390,7 @@ String StringVariable::evalStr() {
 
 void StringVariable::dump(int level) {
     printIndents(level);
-    printf("StringVariable memPos=%lld\n", memPos);
+    printf("StringVariable memPos=%" PRId64 "\n", (int64_t)memPos);
 }
 
 ConstStringVariable::ConstStringVariable(ParserContext* ctx, String _value)
@@ -1355,7 +1460,7 @@ void SelectCase::dump(int level) {
     printIndents(level);
     if (select)
         if (select->isConstExpr())
-            printf("Case select %lld\n", select->evalInt());
+            printf("Case select %" PRId64 "\n", (int64_t)select->evalInt());
         else
             printf("Case select [runtime expr]\n");
     else
@@ -1365,16 +1470,16 @@ void SelectCase::dump(int level) {
         CaseBranch& branch = branches[i];
         if (branch.from && branch.to)
             if (branch.from->isConstExpr() && branch.to->isConstExpr())
-                printf("case %lld to %lld\n", branch.from->evalInt(), branch.to->evalInt());
+                printf("case %" PRId64 " to %" PRId64 "\n", (int64_t)branch.from->evalInt(), (int64_t)branch.to->evalInt());
             else if (branch.from->isConstExpr() && !branch.to->isConstExpr())
-                printf("case %lld to [runtime expr]\n", branch.from->evalInt());
+                printf("case %" PRId64 " to [runtime expr]\n", (int64_t)branch.from->evalInt());
             else if (!branch.from->isConstExpr() && branch.to->isConstExpr())
-                printf("case [runtime expr] to %lld\n", branch.to->evalInt());
+                printf("case [runtime expr] to %" PRId64 "\n", (int64_t)branch.to->evalInt());
             else
                 printf("case [runtime expr] to [runtime expr]\n");
         else if (branch.from)
             if (branch.from->isConstExpr())
-                printf("case %lld\n", branch.from->evalInt());
+                printf("case %" PRId64 "\n", (int64_t)branch.from->evalInt());
             else
                 printf("case [runtime expr]\n");
         else
@@ -1413,7 +1518,7 @@ void While::dump(int level) {
     printIndents(level);
     if (m_condition)
         if (m_condition->isConstExpr())
-            printf("while (%lld) {\n", m_condition->evalInt());
+            printf("while (%" PRId64 ") {\n", (int64_t)m_condition->evalInt());
         else
             printf("while ([runtime expr]) {\n");
     else
@@ -1746,9 +1851,9 @@ void Final::dump(int level) {
     printf(")\n");
 }
 
-StatementsRef ParserContext::userFunctionByName(const String& name) {
+UserFunctionRef ParserContext::userFunctionByName(const String& name) {
     if (!userFnTable.count(name)) {
-        return StatementsRef();
+        return UserFunctionRef();
     }
     return userFnTable.find(name)->second;
 }
@@ -1792,9 +1897,15 @@ ParserContext::~ParserContext() {
         delete globalRealMemory;
         globalRealMemory = NULL;
     }
+    for (void* data : vAutoFreeAfterParse)
+        free(data);
+    vAutoFreeAfterParse.clear();
 }
 
-void ParserContext::addErr(int firstLine, int lastLine, int firstColumn, int lastColumn, const char* txt) {
+void ParserContext::addErr(int firstLine, int lastLine, int firstColumn,
+                           int lastColumn, int firstByte, int lengthBytes,
+                           const char* txt)
+{
     ParserIssue e;
     e.type = PARSER_ERROR;
     e.txt = txt;
@@ -1802,11 +1913,16 @@ void ParserContext::addErr(int firstLine, int lastLine, int firstColumn, int las
     e.lastLine = lastLine;
     e.firstColumn = firstColumn;
     e.lastColumn = lastColumn;
+    e.firstByte = firstByte;
+    e.lengthBytes = lengthBytes;
     vErrors.push_back(e);
     vIssues.push_back(e);
 }
 
-void ParserContext::addWrn(int firstLine, int lastLine, int firstColumn, int lastColumn, const char* txt) {
+void ParserContext::addWrn(int firstLine, int lastLine, int firstColumn,
+                           int lastColumn, int firstByte, int lengthBytes,
+                           const char* txt)
+{
     ParserIssue w;
     w.type = PARSER_WARNING;
     w.txt = txt;
@@ -1814,16 +1930,23 @@ void ParserContext::addWrn(int firstLine, int lastLine, int firstColumn, int las
     w.lastLine = lastLine;
     w.firstColumn = firstColumn;
     w.lastColumn = lastColumn;
+    w.firstByte = firstByte;
+    w.lengthBytes = lengthBytes;
     vWarnings.push_back(w);
     vIssues.push_back(w);
 }
 
-void ParserContext::addPreprocessorComment(int firstLine, int lastLine, int firstColumn, int lastColumn) {
+void ParserContext::addPreprocessorComment(int firstLine, int lastLine,
+                                           int firstColumn, int lastColumn,
+                                           int firstByte, int lengthBytes)
+{
     CodeBlock block;
     block.firstLine = firstLine;
     block.lastLine = lastLine;
     block.firstColumn = firstColumn;
     block.lastColumn = lastColumn;
+    block.firstByte = firstByte;
+    block.lengthBytes = lengthBytes;
     vPreprocessorComments.push_back(block);
 }
 
@@ -1844,6 +1967,10 @@ bool ParserContext::resetPreprocessorCondition(const char* name) {
 bool ParserContext::isPreprocessorConditionSet(const char* name) {
     if (builtinPreprocessorConditions.count(name)) return true;
     return userPreprocessorConditions.count(name);
+}
+
+void ParserContext::autoFreeAfterParse(void* data) {
+    vAutoFreeAfterParse.push_back(data);
 }
 
 std::vector<ParserIssue> ParserContext::issues() const {
@@ -1926,6 +2053,13 @@ ExecContext::ExecContext() :
     suspendMicroseconds(0), instructionsCount(0)
 {
     exitRes.value = NULL;
+}
+
+void ExecContext::copyPolyphonicDataFrom(VMExecContext* ectx) {
+    ExecContext* src = dynamic_cast<ExecContext*>(ectx);
+
+    polyphonicIntMemory.copyFlatFrom(src->polyphonicIntMemory);
+    polyphonicRealMemory.copyFlatFrom(src->polyphonicRealMemory);
 }
 
 void ExecContext::forkTo(VMExecContext* ectx) const {

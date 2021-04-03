@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019 Christian Schoenebeck
+ * Copyright (c) 2014-2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -44,14 +44,15 @@ public:
     StmtFlags_t flags; ///< general completion status (i.e. success or failure) of the function call
     vmint value; ///< result value of the function call
     vmfloat unitPrefixFactor; ///< unit factor of result value of the function call
+    StdUnit_t unitBaseType; ///< fundamental standard measuring unit type (e.g. seconds), this is ALWAYS and ONLY set (to the actual unit type) by @c FunctionCall class for performance reasons.
 
-    VMIntResult() : flags(STMT_SUCCESS), value(0), unitPrefixFactor(VM_NO_FACTOR) {}
+    VMIntResult();
     vmint evalInt() OVERRIDE { return value; }
     VMExpr* resultValue() OVERRIDE { return this; }
     StmtFlags_t resultFlags() OVERRIDE { return flags; }
     bool isConstExpr() const OVERRIDE { return false; }
     vmfloat unitFactor() const OVERRIDE { return unitPrefixFactor; }
-    StdUnit_t unitType() const OVERRIDE { return VM_NO_UNIT; } // actually never called, VMFunction::returnUnitType() is always used instead
+    StdUnit_t unitType() const OVERRIDE { return unitBaseType; }
     bool isFinal() const OVERRIDE { return false; } // actually never called, VMFunction::returnsFinal() is always used instead
 };
 
@@ -64,14 +65,15 @@ public:
     StmtFlags_t flags; ///< general completion status (i.e. success or failure) of the function call
     vmfloat value; ///< result value of the function call
     vmfloat unitPrefixFactor; ///< unit factor of result value of the function call
+    StdUnit_t unitBaseType; ///< fundamental standard measuring unit type (e.g. seconds), this is ALWAYS and ONLY set (to the actual unit type) by @c FunctionCall class for performance reasons.
 
-    VMRealResult() : flags(STMT_SUCCESS), value(0), unitPrefixFactor(VM_NO_FACTOR) {}
+    VMRealResult();
     vmfloat evalReal() OVERRIDE { return value; }
     VMExpr* resultValue() OVERRIDE { return this; }
     StmtFlags_t resultFlags() OVERRIDE { return flags; }
     bool isConstExpr() const OVERRIDE { return false; }
     vmfloat unitFactor() const OVERRIDE { return unitPrefixFactor; }
-    StdUnit_t unitType() const OVERRIDE { return VM_NO_UNIT; } // actually never called, VMFunction::returnUnitType() is always used instead
+    StdUnit_t unitType() const OVERRIDE { return unitBaseType; }
     bool isFinal() const OVERRIDE { return false; } // actually never called, VMFunction::returnsFinal() is always used instead
 };
 
@@ -97,6 +99,7 @@ public:
  */
 class VMEmptyResultFunction : public VMFunction {
 protected:
+    VMEmptyResultFunction() : result(NULL) {}
     virtual ~VMEmptyResultFunction() {}
     ExprType_t returnType(VMFnArgs* args) OVERRIDE { return EMPTY_EXPR; }
     StdUnit_t returnUnitType(VMFnArgs* args) OVERRIDE { return VM_NO_UNIT; }
@@ -104,8 +107,11 @@ protected:
     VMFnResult* errorResult();
     VMFnResult* successResult();
     bool modifiesArg(vmint iArg) const OVERRIDE { return false; }
+    VMFnResult* allocResult(VMFnArgs* args) OVERRIDE { return new VMEmptyResult(); }
+    void bindResult(VMFnResult* res) OVERRIDE;
+    VMFnResult* boundResult() const OVERRIDE;
 protected:
-    VMEmptyResult result;
+    VMEmptyResult* result;
 };
 
 struct VMIntFnResDef {
@@ -124,6 +130,7 @@ struct VMRealFnResDef {
  */
 class VMIntResultFunction : public VMFunction {
 protected:
+    VMIntResultFunction() : result(NULL) {}
     virtual ~VMIntResultFunction() {}
     ExprType_t returnType(VMFnArgs* args) OVERRIDE { return INT_EXPR; }
     VMFnResult* errorResult(vmint i = 0);
@@ -131,8 +138,11 @@ protected:
     VMFnResult* successResult(vmint i = 0);
     VMFnResult* successResult(VMIntFnResDef res);
     bool modifiesArg(vmint iArg) const OVERRIDE { return false; }
+    VMFnResult* allocResult(VMFnArgs* args) OVERRIDE { return new VMIntResult(); }
+    void bindResult(VMFnResult* res) OVERRIDE;
+    VMFnResult* boundResult() const OVERRIDE;
 protected:
-    VMIntResult result;
+    VMIntResult* result;
 };
 
 /**
@@ -141,6 +151,7 @@ protected:
  */
 class VMRealResultFunction : public VMFunction {
 protected:
+    VMRealResultFunction() : result(NULL) {}
     virtual ~VMRealResultFunction() {}
     ExprType_t returnType(VMFnArgs* args) OVERRIDE { return REAL_EXPR; }
     VMFnResult* errorResult(vmfloat f = 0);
@@ -148,8 +159,11 @@ protected:
     VMFnResult* successResult(vmfloat f = 0);
     VMFnResult* successResult(VMRealFnResDef res);
     bool modifiesArg(vmint iArg) const OVERRIDE { return false; }
+    VMFnResult* allocResult(VMFnArgs* args) OVERRIDE { return new VMRealResult(); }
+    void bindResult(VMFnResult* res) OVERRIDE;
+    VMFnResult* boundResult() const OVERRIDE;
 protected:
-    VMRealResult result;
+    VMRealResult* result;
 };
 
 /**
@@ -158,13 +172,17 @@ protected:
  */
 class VMStringResultFunction : public VMFunction {
 protected:
+    VMStringResultFunction() : result(NULL) {}
     virtual ~VMStringResultFunction() {}
     ExprType_t returnType(VMFnArgs* args) OVERRIDE { return STRING_EXPR; }
     VMFnResult* errorResult(const String& s = "");
     VMFnResult* successResult(const String& s = "");
     bool modifiesArg(vmint iArg) const OVERRIDE { return false; }
+    VMFnResult* allocResult(VMFnArgs* args) OVERRIDE { return new VMStringResult(); }
+    void bindResult(VMFnResult* res) OVERRIDE;
+    VMFnResult* boundResult() const OVERRIDE;
 protected:
-    VMStringResult result;
+    VMStringResult* result;
 };
 
 /**
@@ -175,6 +193,7 @@ protected:
  */
 class VMNumberResultFunction : public VMFunction {
 protected:
+    VMNumberResultFunction() : intResult(NULL), realResult(NULL) {}
     virtual ~VMNumberResultFunction() {}
     VMFnResult* errorResult(vmint i);
     VMFnResult* errorResult(vmfloat f);
@@ -185,9 +204,12 @@ protected:
     VMFnResult* successIntResult(VMIntFnResDef res);
     VMFnResult* successRealResult(VMRealFnResDef res);
     bool modifiesArg(vmint iArg) const OVERRIDE { return false; }
+    VMFnResult* allocResult(VMFnArgs* args) OVERRIDE;
+    void bindResult(VMFnResult* res) OVERRIDE;
+    VMFnResult* boundResult() const OVERRIDE;
 protected:
-    VMIntResult intResult;
-    VMRealResult realResult;
+    VMIntResult* intResult;
+    VMRealResult* realResult;
 };
 
 
@@ -372,6 +394,34 @@ public:
     vmint maxAllowedArgs() const OVERRIDE { return 2; }
     bool acceptsArgType(vmint iArg, ExprType_t type) const OVERRIDE { return type == INT_EXPR; }
     bool acceptsArgFinal(vmint iArg) const OVERRIDE { return true; }
+    VMFnResult* exec(VMFnArgs* args) OVERRIDE;
+};
+
+/**
+ * Implements the built-in msb() script function.
+ */
+class CoreVMFunction_msb FINAL : public VMIntResultFunction {
+public:
+    StdUnit_t returnUnitType(VMFnArgs* args) OVERRIDE { return VM_NO_UNIT; }
+    bool returnsFinal(VMFnArgs* args) OVERRIDE { return false; }
+    vmint minRequiredArgs() const OVERRIDE { return 1; }
+    vmint maxAllowedArgs() const OVERRIDE { return 1; }
+    bool acceptsArgType(vmint iArg, ExprType_t type) const OVERRIDE { return type == INT_EXPR; }
+    bool acceptsArgFinal(vmint iArg) const OVERRIDE { return false; }
+    VMFnResult* exec(VMFnArgs* args) OVERRIDE;
+};
+
+/**
+ * Implements the built-in lsb() script function.
+ */
+class CoreVMFunction_lsb FINAL : public VMIntResultFunction {
+public:
+    StdUnit_t returnUnitType(VMFnArgs* args) OVERRIDE { return VM_NO_UNIT; }
+    bool returnsFinal(VMFnArgs* args) OVERRIDE { return false; }
+    vmint minRequiredArgs() const OVERRIDE { return 1; }
+    vmint maxAllowedArgs() const OVERRIDE { return 1; }
+    bool acceptsArgType(vmint iArg, ExprType_t type) const OVERRIDE { return type == INT_EXPR; }
+    bool acceptsArgFinal(vmint iArg) const OVERRIDE { return false; }
     VMFnResult* exec(VMFnArgs* args) OVERRIDE;
 };
 

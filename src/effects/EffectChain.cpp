@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- *   Copyright (C) 2008 - 2016 Christian Schoenebeck                       *
+ *   Copyright (C) 2008 - 2020 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -37,6 +37,10 @@ void EffectChain::AppendEffect(Effect* pEffect) {
 }
 
 void EffectChain::InsertEffect(Effect* pEffect, int iChainPos) throw (Exception) {
+    if (iChainPos == vEntries.size()) {
+        AppendEffect(pEffect);
+        return;
+    }
     if (iChainPos < 0 || iChainPos >= vEntries.size())
         throw Exception(
             "Cannot insert effect at chain position " +

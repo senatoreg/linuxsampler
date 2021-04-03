@@ -25,6 +25,7 @@
 #include "../common/global.h"
 #include "../common/Ref.h"
 #include "../common/ArrayList.h"
+#include "../common/optional.h"
 #include "common.h"
 
 namespace LinuxSampler {
@@ -39,6 +40,18 @@ enum StmtType_t {
     STMT_LOOP,
     STMT_SYNC,
     STMT_NOOP,
+};
+
+enum Qualifier_t {
+    QUALIFIER_NONE = 0,
+    QUALIFIER_CONST = 1,
+    QUALIFIER_POLYPHONIC = (1<<1),
+    QUALIFIER_PATCH = (1<<2),
+};
+
+struct PatchVarBlock {
+    CodeBlock nameBlock;
+    optional<CodeBlock> exprBlock;
 };
 
 /**
@@ -68,6 +81,16 @@ inline ExprType_t scalarTypeOfArray(ExprType_t arrayType) {
     if (arrayType == STRING_ARR_EXPR) return STRING_EXPR;
     assert(false);
     return EMPTY_EXPR; // just to shut up the compiler
+}
+
+inline String qualifierStr(Qualifier_t qualifier) {
+    switch (qualifier) {
+        case QUALIFIER_NONE:          return "none";
+        case QUALIFIER_CONST:         return "const";
+        case QUALIFIER_POLYPHONIC:    return "polyphonic";
+        case QUALIFIER_PATCH:         return "patch";
+    }
+    return "unknown";
 }
 
 /**
@@ -340,7 +363,7 @@ public:
     bool isAssignable() const OVERRIDE { return ptr->isAssignable(); }
     void assign(Expression* expr) OVERRIDE;
     vmint evalInt() OVERRIDE;
-    vmfloat unitFactor() const OVERRIDE { return VM_NO_UNIT; }
+    vmfloat unitFactor() const OVERRIDE { return VM_NO_FACTOR; }
     void dump(int level = 0) OVERRIDE;
 };
 typedef Ref<BuiltInIntVariable,Node> BuiltInIntVariableRef;
@@ -612,17 +635,19 @@ public:
 };
 typedef Ref<DynamicVariableCall,Node> DynamicVariableCallRef;
 
-class FunctionCall : virtual public LeafStatement, virtual public IntExpr, virtual public RealExpr, virtual public StringExpr {
+class FunctionCall : virtual public LeafStatement, virtual public IntExpr, virtual public RealExpr, virtual public StringExpr, virtual public ArrayExpr {
     String functionName;
     ArgsRef args;
     VMFunction* fn;
     VMFnResult* result;
 public:
     FunctionCall(const char* function, ArgsRef args, VMFunction* fn);
+    virtual ~FunctionCall();
     void dump(int level = 0) OVERRIDE;
     StmtFlags_t exec() OVERRIDE;
     vmint evalInt() OVERRIDE;
     vmfloat evalReal() OVERRIDE;
+    vmint arraySize() const OVERRIDE;
     VMIntArrayExpr* asIntArray() const OVERRIDE;
     VMRealArrayExpr* asRealArray() const OVERRIDE;
     String evalStr() OVERRIDE;
@@ -644,14 +669,26 @@ public:
 };
 typedef Ref<NoFunctionCall,Node> NoFunctionCallRef;
 
-class EventHandler : virtual public Statements, virtual public VMEventHandler {
+class Subroutine : public Statements {
     StatementsRef statements;
+public:
+    Subroutine(StatementsRef statements);
+    Statement* statement(uint i) OVERRIDE { return statements->statement(i); }
+    void dump(int level = 0) OVERRIDE;
+};
+typedef Ref<Subroutine,Node> SubroutineRef;
+
+class UserFunction : public Subroutine {
+public:
+    UserFunction(StatementsRef statements);
+};
+typedef Ref<UserFunction,Node> UserFunctionRef;
+
+class EventHandler : public Subroutine, virtual public VMEventHandler {
     bool usingPolyphonics;
 public:
     void dump(int level = 0) OVERRIDE;
-    StmtFlags_t exec();
     EventHandler(StatementsRef statements);
-    Statement* statement(uint i) OVERRIDE { return statements->statement(i); }
     bool isPolyphonic() const OVERRIDE { return usingPolyphonics; }
 };
 typedef Ref<EventHandler,Node> EventHandlerRef;
@@ -687,6 +724,22 @@ public:
     String eventHandlerName() const OVERRIDE { return "controller"; }
 };
 typedef Ref<OnController,Node> OnControllerRef;
+
+class OnRpn FINAL : public EventHandler {
+public:
+    OnRpn(StatementsRef statements) : EventHandler(statements) {}
+    VMEventHandlerType_t eventHandlerType() const OVERRIDE { return VM_EVENT_HANDLER_RPN; }
+    String eventHandlerName() const OVERRIDE { return "rpn"; }
+};
+typedef Ref<OnRpn,Node> OnRpnRef;
+
+class OnNrpn FINAL : public EventHandler {
+public:
+    OnNrpn(StatementsRef statements) : EventHandler(statements) {}
+    VMEventHandlerType_t eventHandlerType() const OVERRIDE { return VM_EVENT_HANDLER_NRPN; }
+    String eventHandlerName() const OVERRIDE { return "nrpn"; }
+};
+typedef Ref<OnNrpn,Node> OnNrpnRef;
 
 class EventHandlers FINAL : virtual public Node {
     std::vector<EventHandlerRef> args;
@@ -913,16 +966,19 @@ public:
 
     void* scanner;
     std::istream* is;
+    int nbytes;
     std::vector<ParserIssue> vErrors;
     std::vector<ParserIssue> vWarnings;
     std::vector<ParserIssue> vIssues;
     std::vector<CodeBlock>   vPreprocessorComments;
+    std::vector<void*>       vAutoFreeAfterParse;
+    std::map<String,PatchVarBlock> patchVars;
 
     std::set<String> builtinPreprocessorConditions;
     std::set<String> userPreprocessorConditions;
 
     std::map<String,VariableRef> vartable;
-    std::map<String,StatementsRef> userFnTable;
+    std::map<String,UserFunctionRef> userFnTable;
     vmint globalIntVarCount;
     vmint globalRealVarCount;
     vmint globalStrVarCount;
@@ -937,6 +993,8 @@ public:
     OnNoteRef onNote;
     OnReleaseRef onRelease;
     OnControllerRef onController;
+    OnRpnRef onRpn;
+    OnNrpnRef onNrpn;
 
     ArrayList<vmint>* globalIntMemory;
     ArrayList<vmfloat>* globalRealMemory;
@@ -949,7 +1007,7 @@ public:
     ExecContext* execContext;
 
     ParserContext(VMFunctionProvider* parent) :
-        scanner(NULL), is(NULL),
+        scanner(NULL), is(NULL), nbytes(0),
         globalIntVarCount(0), globalRealVarCount(0), globalStrVarCount(0),
         globalUnitFactorCount(0),
         polyphonicIntVarCount(0), polyphonicRealVarCount(0),
@@ -966,15 +1024,19 @@ public:
     RealVariableRef globalRealVar(const String& name);
     StringVariableRef globalStrVar(const String& name);
     VariableRef variableByName(const String& name);
-    StatementsRef userFunctionByName(const String& name);
-    void addErr(int firstLine, int lastLine, int firstColumn, int lastColumn, const char* txt);
-    void addWrn(int firstLine, int lastLine, int firstColumn, int lastColumn, const char* txt);
-    void addPreprocessorComment(int firstLine, int lastLine, int firstColumn, int lastColumn);
+    UserFunctionRef userFunctionByName(const String& name);
+    void addErr(int firstLine, int lastLine, int firstColumn, int lastColumn,
+                int firstByte, int lengthBytes, const char* txt);
+    void addWrn(int firstLine, int lastLine, int firstColumn, int lastColumn,
+                int firstByte, int lengthBytes, const char* txt);
+    void addPreprocessorComment(int firstLine, int lastLine, int firstColumn,
+                                int lastColumn, int firstByte, int lengthBytes);
     void createScanner(std::istream* is);
     void destroyScanner();
     bool setPreprocessorCondition(const char* name);
     bool resetPreprocessorCondition(const char* name);
     bool isPreprocessorConditionSet(const char* name);
+    void autoFreeAfterParse(void* data);
     std::vector<ParserIssue> issues() const OVERRIDE;
     std::vector<ParserIssue> errors() const OVERRIDE;
     std::vector<ParserIssue> warnings() const OVERRIDE;
@@ -1064,6 +1126,8 @@ public:
                 polyphonicUnitFactorMemory[i] = VM_NO_FACTOR;
         }
     }
+
+    void copyPolyphonicDataFrom(VMExecContext* ectx) OVERRIDE;
 
     size_t instructionsPerformed() const OVERRIDE {
         return instructionsCount;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2019 Christian Schoenebeck
+ * Copyright (c) 2015-2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -31,6 +31,8 @@
 #define YY_USER_ACTION               \
     yyextra->line   = yylineno - 1;  \
     yyextra->column = yycolumn;      \
+    yyextra->offset += (int) yyleng; \
+    yyextra->length =  (int) yyleng; \
     yycolumn += yyleng;
 
 using namespace LinuxSampler;
@@ -227,7 +229,7 @@ END_ID   on|while|if|select|function|synchronized
 
  /* Event Handler Names (only if they occur alone in a document!) */
  
-^\s*(init|note|release|controller) {
+^\s*(init|note|release|controller|rpn|nrpn) {
     yyextra->token = EventHandlerNameToken(yytext);
     return yyextra->token.baseType;
 }
@@ -264,7 +266,7 @@ end {
     return yyextra->token.baseType;
 }
 
-declare|while|if|or|and|not|else|case|select|to|mod|const|polyphonic|function|call|synchronized {
+declare|while|if|or|and|not|else|case|select|to|mod|const|polyphonic|function|call|synchronized|patch {
     yyextra->token = KeywordToken(yytext);
     return yyextra->token.baseType;
 }

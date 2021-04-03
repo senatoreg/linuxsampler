@@ -98,6 +98,26 @@ void NKSPTest::testNKSPPrecedenceOfOperators() {
     testPrecedenceOfOperators();
 }
 
+void NKSPTest::testNKSPIntVarDeclaration() {
+    testIntVarDeclaration();
+}
+
+void NKSPTest::testNKSPIntArrayVarDeclaration() {
+    testIntArrayVarDeclaration();
+}
+
+void NKSPTest::testNKSPRealVarDeclaration() {
+    testRealVarDeclaration();
+}
+
+void NKSPTest::testNKSPRealArrayVarDeclaration() {
+    testRealArrayVarDeclaration();
+}
+
+void NKSPTest::testNKSPStringVarDeclaration() {
+    testStringVarDeclaration();
+}
+
 void NKSPTest::testNKSPBuiltInMinFunction() {
     testBuiltInMinFunction();
 }
@@ -132,6 +152,14 @@ void NKSPTest::testNKSPBuiltInShiftLeftFunction() {
 
 void NKSPTest::testNKSPBuiltInShiftRightFunction() {
     testBuiltInShiftRightFunction();
+}
+
+void NKSPTest::testNKSPBuiltInMsbFunction() {
+    testBuiltInMsbFunction();
+}
+
+void NKSPTest::testNKSPBuiltInLsbFunction() {
+    testBuiltInLsbFunction();
 }
 
 void NKSPTest::testNKSPBuiltInIntToRealFunction() {
@@ -232,4 +260,8 @@ void NKSPTest::testNKSPIfStatement() {
 
 void NKSPTest::testNKSPWhileStatement() {
     testWhileStatement();
+}
+
+void NKSPTest::testNKSPBuiltInVars() {
+    testBuiltInVars();
 }

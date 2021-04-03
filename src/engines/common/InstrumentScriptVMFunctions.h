@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 - 2019 Christian Schoenebeck
+ * Copyright (c) 2014 - 2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -40,6 +40,32 @@ namespace LinuxSampler {
     class InstrumentScriptVMFunction_set_controller FINAL : public VMIntResultFunction {
     public:
         InstrumentScriptVMFunction_set_controller(InstrumentScriptVM* parent);
+        StdUnit_t returnUnitType(VMFnArgs* args) OVERRIDE { return VM_NO_UNIT; }
+        bool returnsFinal(VMFnArgs* args) OVERRIDE { return false; }
+        vmint minRequiredArgs() const OVERRIDE { return 2; }
+        vmint maxAllowedArgs() const OVERRIDE { return 2; }
+        bool acceptsArgType(vmint iArg, ExprType_t type) const OVERRIDE { return type == INT_EXPR;}
+        VMFnResult* exec(VMFnArgs* args) OVERRIDE;
+    protected:
+        InstrumentScriptVM* m_vm;
+    };
+
+    class InstrumentScriptVMFunction_set_rpn FINAL : public VMIntResultFunction {
+    public:
+        InstrumentScriptVMFunction_set_rpn(InstrumentScriptVM* parent);
+        StdUnit_t returnUnitType(VMFnArgs* args) OVERRIDE { return VM_NO_UNIT; }
+        bool returnsFinal(VMFnArgs* args) OVERRIDE { return false; }
+        vmint minRequiredArgs() const OVERRIDE { return 2; }
+        vmint maxAllowedArgs() const OVERRIDE { return 2; }
+        bool acceptsArgType(vmint iArg, ExprType_t type) const OVERRIDE { return type == INT_EXPR;}
+        VMFnResult* exec(VMFnArgs* args) OVERRIDE;
+    protected:
+        InstrumentScriptVM* m_vm;
+    };
+
+    class InstrumentScriptVMFunction_set_nrpn FINAL : public VMIntResultFunction {
+    public:
+        InstrumentScriptVMFunction_set_nrpn(InstrumentScriptVM* parent);
         StdUnit_t returnUnitType(VMFnArgs* args) OVERRIDE { return VM_NO_UNIT; }
         bool returnsFinal(VMFnArgs* args) OVERRIDE { return false; }
         vmint minRequiredArgs() const OVERRIDE { return 2; }
@@ -127,6 +153,9 @@ namespace LinuxSampler {
         ExprType_t returnType(VMFnArgs* args) OVERRIDE { return INT_ARR_EXPR; }
         void checkArgs(VMFnArgs* args, std::function<void(String)> err,
                        std::function<void(String)> wrn) OVERRIDE;
+        VMFnResult* allocResult(VMFnArgs* args) OVERRIDE;
+        void bindResult(VMFnResult* res) OVERRIDE;
+        VMFnResult* boundResult() const OVERRIDE;
         VMFnResult* exec(VMFnArgs* args) OVERRIDE;
     protected:
         InstrumentScriptVM* m_vm;
@@ -143,7 +172,7 @@ namespace LinuxSampler {
             VMExpr* resultValue() OVERRIDE { return this; }
             StmtFlags_t resultFlags() OVERRIDE { return flags; }
             bool isConstExpr() const OVERRIDE { return false; }
-        } m_result;
+        } *m_result;
 
         VMFnResult* errorResult();
         VMFnResult* successResult(EventGroup* eventGroup);
@@ -216,7 +245,8 @@ namespace LinuxSampler {
     protected:
         InstrumentScriptVM* m_vm;
     };
-    
+
+    //TODO: Derive from generalized, shared template class VMChangeSynthParamFunction instead (like e.g. change_cutoff_attack() implementation below already does).
     class InstrumentScriptVMFunction_change_attack FINAL : public VMEmptyResultFunction {
         using Super = VMEmptyResultFunction; // just an alias for the super class
     public:
@@ -234,6 +264,7 @@ namespace LinuxSampler {
         InstrumentScriptVM* m_vm;
     };
 
+    //TODO: Derive from generalized, shared template class VMChangeSynthParamFunction instead (like e.g. change_cutoff_decay() implementation below already does).
     class InstrumentScriptVMFunction_change_decay FINAL : public VMEmptyResultFunction {
         using Super = VMEmptyResultFunction; // just an alias for the super class
     public:
@@ -250,7 +281,8 @@ namespace LinuxSampler {
     protected:
         InstrumentScriptVM* m_vm;
     };
-    
+
+    //TODO: Derive from generalized, shared template class VMChangeSynthParamFunction instead (like e.g. change_cutoff_release() implementation below already does).
     class InstrumentScriptVMFunction_change_release FINAL : public VMEmptyResultFunction {
         using Super = VMEmptyResultFunction; // just an alias for the super class
     public:

@@ -3,9 +3,9 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003,2004 by Benno Senoner and Christian Schoenebeck    *
- *   Copyright (C) 2005-2008 Christian Schoenebeck                         *
- *   Copyright (C) 2009-2012 Christian Schoenebeck and Grigor Iliev        *
- *   Copyright (C) 2013-2017 Christian Schoenebeck and Andreas Persson     *
+ *   Copyright (C) 2005-2020 Christian Schoenebeck                         *
+ *   Copyright (C) 2009-2012 Grigor Iliev                                  *
+ *   Copyright (C) 2013-2017 Andreas Persson                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -118,7 +118,18 @@ namespace LinuxSampler {
         itKillEvent     = Pool<Event>::Iterator();
         MidiKeyBase* pKeyInfo = GetMidiKeyInfo(MIDIKey());
 
-        pGroupEvents = iKeyGroup ? pEngineChannel->ActiveKeyGroups[iKeyGroup] : 0;
+        // when editing key groups with an instrument editor while sound was
+        // already loaded, ActiveKeyGroups may not have the KeyGroup in question
+        // so use find() here instead of array subscript operator[] to avoid an
+        // implied creation of a NULL entry, to prevent a crash while editing
+        // instruments
+        {
+            AbstractEngineChannel::ActiveKeyGroupMap::const_iterator it =
+                pEngineChannel->ActiveKeyGroups.find(iKeyGroup);
+            pGroupEvents =
+                (iKeyGroup && it != pEngineChannel->ActiveKeyGroups.end()) ?
+                    it->second : NULL;
+        }
 
         SmplInfo   = GetSampleInfo();
         RgnInfo    = GetRegionInfo();
@@ -164,7 +175,8 @@ namespace LinuxSampler {
 
         if (DiskVoice) { // voice to be streamed from disk
             if (cachedsamples > (GetEngine()->MaxSamplesPerCycle << CONFIG_MAX_PITCH)) {
-                MaxRAMPos = cachedsamples - (GetEngine()->MaxSamplesPerCycle << CONFIG_MAX_PITCH) / SmplInfo.ChannelCount; //TODO: this calculation is too pessimistic and may better be moved to Render() method, so it calculates MaxRAMPos dependent to the current demand of sample points to be rendered (e.g. in case of JACK)
+                //TODO: this calculation is too pessimistic
+                MaxRAMPos = cachedsamples - (GetEngine()->MaxSamplesPerCycle << CONFIG_MAX_PITCH);
             } else {
                 // The cache is too small to fit a max sample buffer.
                 // Setting MaxRAMPos to 0 will probably cause a click
@@ -878,6 +890,10 @@ namespace LinuxSampler {
                     case Event::synth_param_decay:
                     case Event::synth_param_sustain:
                     case Event::synth_param_release:
+                    case Event::synth_param_cutoff_attack:
+                    case Event::synth_param_cutoff_decay:
+                    case Event::synth_param_cutoff_sustain:
+                    case Event::synth_param_cutoff_release:
                         break; // noop
                 }
             }

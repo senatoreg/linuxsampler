@@ -3,7 +3,7 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003, 2004 by Benno Senoner and Christian Schoenebeck   *
- *   Copyright (C) 2005 - 2019 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2021 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -117,7 +117,7 @@ namespace LinuxSampler {
      * return an invalid Iterator, and thus will prevent you from misusing an
      * event which no longer "exists".
      *
-     * Note that an @c Event object usually just "exists" for exactly on audio
+     * Note that an @c Event object usually just "exists" for exactly one audio
      * fragment cycle: that is it exists right from the beginning of the audio
      * fragment cycle where it was caused (i.e. where its MIDI data was
      * received by the respective engine channel) and will disappear
@@ -167,6 +167,8 @@ namespace LinuxSampler {
                 type_note_off, ///< (real) MIDI note-off event
                 type_pitchbend, ///< MIDI pitch bend wheel change event
                 type_control_change, ///< MIDI CC event
+                type_rpn, ///< Transformed from a raw RPN CC MIDI event.
+                type_nrpn, ///< Transformed from a raw NRPN CC MIDI event.
                 type_sysex,           ///< MIDI system exclusive message
                 type_cancel_release_key, ///< transformed either from a (real) MIDI note-on or sustain-pedal-down event
                 type_release_key,     ///< transformed either from a (real) MIDI note-off or sustain-pedal-up event
@@ -258,6 +260,16 @@ namespace LinuxSampler {
                     uint8_t Controller;  ///< MIDI controller number of control change event.
                     uint8_t Value;       ///< Controller Value of control change event.
                 } CC;
+                /// Used for both RPN & NRPN events
+                struct _RPN {
+                    uint8_t Channel;     ///< MIDI channel (0..15)
+                    uint16_t Parameter;  ///< Merged 14 bit representation of parameter number (that is MSB and LSB combined).
+                    uint16_t Value;      ///< Merged 14 bit representation of new (N)RPN value (that is MSB and LSB combined).
+                    uint8_t ParameterMSB() const { return Parameter >> 7; }
+                    uint8_t ParameterLSB() const { return Parameter & 127; }
+                    uint8_t ValueMSB() const { return Value >> 7; }
+                    uint8_t ValueLSB() const { return Value & 127; }
+                } RPN, NRPN;
                 /// Pitchbend event specifics
                 struct _Pitch {
                     uint8_t Channel;     ///< MIDI channel (0..15)
@@ -294,11 +306,7 @@ namespace LinuxSampler {
             MidiInputPort* pMidiInputPort; ///< Pointer to the MIDI input port on which this event occured (NOTE: currently only for global events, that is SysEx messages)
 
             inline void Init() {
-                //FIXME: probably we should memset() zero entire structure here, due to potential union initialization conflicts (see comment on ValueScope::RELATIVE)
-                Param.Note.ID = 0;
-                Param.Note.ParentNoteID = 0;
-                Param.NoteSynthParam.NoteID = 0;
-                Param.NoteSynthParam.Scope = ValueScope::RELATIVE;
+                memset(&Param, 0, sizeof(Param));
             }
             inline int32_t FragmentPos() {
                 if (iFragmentPos >= 0) return iFragmentPos;
@@ -337,6 +345,32 @@ namespace LinuxSampler {
             time_stamp_t    TimeStamp;       ///< Time stamp of the event's occurence.
             int32_t         iFragmentPos;    ///< Position in the current fragment this event refers to.
     };
+
+    inline Pool<Event>::Iterator prevEventOf(const Pool<Event>::Iterator& itEvent) {
+        if (!itEvent) return Pool<Event>::Iterator();
+        Pool<Event>::Iterator itPrev = itEvent;
+        return --itPrev;
+    }
+
+    inline Pool<Event>::Iterator nextEventOf(const Pool<Event>::Iterator& itEvent) {
+        if (!itEvent) return Pool<Event>::Iterator();
+        Pool<Event>::Iterator itNext = itEvent;
+        return ++itNext;
+    }
+
+    inline bool isPrevEventCCNr(const Pool<Event>::Iterator& itEvent, uint8_t CCNr) {
+        Pool<Event>::Iterator itPrev = prevEventOf(itEvent);
+        if (!itPrev) return false;
+        return itPrev->Type == Event::type_control_change &&
+               itPrev->Param.CC.Controller == CCNr;
+    }
+
+    inline bool isNextEventCCNr(const Pool<Event>::Iterator& itEvent, uint8_t CCNr) {
+        Pool<Event>::Iterator itNext = nextEventOf(itEvent);
+        if (!itNext) return false;
+        return itNext->Type == Event::type_control_change &&
+               itNext->Param.CC.Controller == CCNr;
+    }
 
     /**
      * Used to sort timing relevant objects (i.e. events) into timing/scheduler
@@ -404,6 +438,7 @@ namespace LinuxSampler {
         int currentHandler; ///< Current index in 'handlers' list above.
         int executionSlices; ///< Amount of times this script event has been executed by the ScriptVM runner class.
         bool ignoreAllWaitCalls; ///< If true: calling any built-in wait*() script function should be ignored (this variable may be set with the 2nd argument of built-in script function stop_wait()).
+        bool releaseMatched; ///< Only for note handlers with polyphonic data: whether a corresponding release handler has already been triggered subsequently for this note handler.
         VMEventHandlerType_t handlerType; ///< Native representation of built-in script variable $NI_CALLBACK_TYPE, reflecting the script event type of this script event.
         script_callback_id_t parentHandlerID; ///< Only in case this script handler instance was created by calling built-in script function fork(): callback ID of the parent event handler instance which created this child. For regular event handler instances which were not created by fork(), this variable reflects 0 (which is always considered an invalid handler ID).
         script_callback_id_t childHandlerID[MAX_FORK_PER_SCRIPT_HANDLER+1]; ///< In case built-in script function fork() was called by this script handler instance: A zero terminated ID list of all child event handler instances (note: children will not vanish from this list after they terminated).

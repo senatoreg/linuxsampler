@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019 Christian Schoenebeck
+ * Copyright (c) 2014-2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -13,7 +13,7 @@
 #include "../../common/global_private.h"
 
 namespace LinuxSampler {
-    
+
     // play_note() function
 
     InstrumentScriptVMFunction_play_note::InstrumentScriptVMFunction_play_note(InstrumentScriptVM* parent)
@@ -202,6 +202,80 @@ namespace LinuxSampler {
             errMsg("set_controller(): argument 1 is an invalid controller");
             return errorResult();
         }
+
+        const event_id_t id = pEngineChannel->ScheduleEventMicroSec(&e, 0);
+
+        // even if id is null, don't return an errorResult() here, because that
+        // would abort the script, and under heavy load it may be considerable
+        // that ScheduleEventMicroSec() fails above, so simply ignore that
+        return successResult( ScriptID::fromEventID(id) );
+    }
+
+    // set_rpn() function
+
+    InstrumentScriptVMFunction_set_rpn::InstrumentScriptVMFunction_set_rpn(InstrumentScriptVM* parent)
+        : m_vm(parent)
+    {
+    }
+
+    VMFnResult* InstrumentScriptVMFunction_set_rpn::exec(VMFnArgs* args) {
+        vmint parameter = args->arg(0)->asInt()->evalInt();
+        vmint value     = args->arg(1)->asInt()->evalInt();
+
+        if (parameter < 0 || parameter > 16383) {
+            errMsg("set_rpn(): argument 1 exceeds RPN parameter number range");
+            return errorResult();
+        }
+        if (value < 0 || value > 16383) {
+            errMsg("set_rpn(): argument 2 exceeds RPN value range");
+            return errorResult();
+        }
+
+        AbstractEngineChannel* pEngineChannel =
+            static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
+
+        Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
+        e.Init(); // clear IDs
+        e.Type = Event::type_rpn;
+        e.Param.RPN.Parameter = parameter;
+        e.Param.RPN.Value = value;
+
+        const event_id_t id = pEngineChannel->ScheduleEventMicroSec(&e, 0);
+
+        // even if id is null, don't return an errorResult() here, because that
+        // would abort the script, and under heavy load it may be considerable
+        // that ScheduleEventMicroSec() fails above, so simply ignore that
+        return successResult( ScriptID::fromEventID(id) );
+    }
+
+    // set_nrpn() function
+
+    InstrumentScriptVMFunction_set_nrpn::InstrumentScriptVMFunction_set_nrpn(InstrumentScriptVM* parent)
+        : m_vm(parent)
+    {
+    }
+
+    VMFnResult* InstrumentScriptVMFunction_set_nrpn::exec(VMFnArgs* args) {
+        vmint parameter = args->arg(0)->asInt()->evalInt();
+        vmint value     = args->arg(1)->asInt()->evalInt();
+
+        if (parameter < 0 || parameter > 16383) {
+            errMsg("set_nrpn(): argument 1 exceeds NRPN parameter number range");
+            return errorResult();
+        }
+        if (value < 0 || value > 16383) {
+            errMsg("set_nrpn(): argument 2 exceeds NRPN value range");
+            return errorResult();
+        }
+
+        AbstractEngineChannel* pEngineChannel =
+            static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
+
+        Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
+        e.Init(); // clear IDs
+        e.Type = Event::type_nrpn;
+        e.Param.NRPN.Parameter = parameter;
+        e.Param.NRPN.Value = value;
 
         const event_id_t id = pEngineChannel->ScheduleEventMicroSec(&e, 0);
 
@@ -451,7 +525,7 @@ namespace LinuxSampler {
     // by_marks() function
 
     InstrumentScriptVMFunction_by_marks::InstrumentScriptVMFunction_by_marks(InstrumentScriptVM* parent)
-        : m_vm(parent)
+        : m_vm(parent), m_result(NULL)
     {
     }
 
@@ -464,15 +538,15 @@ namespace LinuxSampler {
     }
 
     VMFnResult* InstrumentScriptVMFunction_by_marks::errorResult() {
-        m_result.eventGroup = NULL;
-        m_result.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-        return &m_result;
+        m_result->eventGroup = NULL;
+        m_result->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+        return m_result;
     }
 
     VMFnResult* InstrumentScriptVMFunction_by_marks::successResult(EventGroup* eventGroup) {
-        m_result.eventGroup = eventGroup;
-        m_result.flags = STMT_SUCCESS;
-        return &m_result;
+        m_result->eventGroup = eventGroup;
+        m_result->flags = STMT_SUCCESS;
+        return m_result;
     }
 
     void InstrumentScriptVMFunction_by_marks::checkArgs(VMFnArgs* args,
@@ -490,6 +564,18 @@ namespace LinuxSampler {
                 return;
             }
         }
+    }
+
+    VMFnResult* InstrumentScriptVMFunction_by_marks::allocResult(VMFnArgs* args) {
+        return new Result;
+    }
+
+    void InstrumentScriptVMFunction_by_marks::bindResult(VMFnResult* res) {
+        m_result = dynamic_cast<Result*>(res);
+    }
+
+    VMFnResult* InstrumentScriptVMFunction_by_marks::boundResult() const {
+        return m_result;
     }
 
     VMFnResult* InstrumentScriptVMFunction_by_marks::exec(VMFnArgs* args) {
@@ -906,10 +992,9 @@ namespace LinuxSampler {
             (unit) ?
                 true : // imply 'final' value if unit type is used
                 args->arg(1)->asNumber()->isFinal();
-        if (!unit && cutoff > VM_FILTER_PAR_MAX_VALUE) {
-            wrnMsg("change_cutoff(): argument 2 may not be larger than " strfy(VM_FILTER_PAR_MAX_VALUE));
-            cutoff = VM_FILTER_PAR_MAX_VALUE;
-        } else if (unit && cutoff > VM_FILTER_PAR_MAX_HZ) {
+        // note: intentionally not checking against a max. value here if no unit!
+        // (to allow i.e. passing 2000000 for doubling cutoff frequency)
+        if (unit && cutoff > VM_FILTER_PAR_MAX_HZ) {
             wrnMsg("change_cutoff(): argument 2 may not be larger than " strfy(VM_FILTER_PAR_MAX_HZ) " Hz");
             cutoff = VM_FILTER_PAR_MAX_HZ;
         } else if (cutoff < 0) {
@@ -986,7 +1071,7 @@ namespace LinuxSampler {
     }
 
     // change_reso() function
-    
+
     InstrumentScriptVMFunction_change_reso::InstrumentScriptVMFunction_change_reso(InstrumentScriptVM* parent)
         : m_vm(parent)
     {
@@ -1006,10 +1091,9 @@ namespace LinuxSampler {
     VMFnResult* InstrumentScriptVMFunction_change_reso::exec(VMFnArgs* args) {
         vmint resonance = args->arg(1)->asInt()->evalInt();
         bool isFinal    = args->arg(1)->asInt()->isFinal();
-        if (resonance > VM_FILTER_PAR_MAX_VALUE) {
-            wrnMsg("change_reso(): argument 2 may not be larger than 1000000");
-            resonance = VM_FILTER_PAR_MAX_VALUE;
-        } else if (resonance < 0) {
+        // note: intentionally not checking against a max. value here!
+        // (to allow i.e. passing 2000000 for doubling the resonance)
+        if (resonance < 0) {
             wrnMsg("change_reso(): argument 2 may not be negative");
             resonance = 0;
         }
@@ -1080,8 +1164,12 @@ namespace LinuxSampler {
 
         return successResult();
     }
-    
+
     // change_attack() function
+    //
+    //TODO: Derive from generalized, shared template class
+    // VMChangeSynthParamFunction instead (like e.g. change_cutoff_attack()
+    // implementation below already does) to ease maintenance.
 
     InstrumentScriptVMFunction_change_attack::InstrumentScriptVMFunction_change_attack(InstrumentScriptVM* parent)
         : m_vm(parent)
@@ -1143,7 +1231,9 @@ namespace LinuxSampler {
             attack = 0;
         }
         const float fAttack =
-            (unit) ? attack : float(attack) / float(VM_EG_PAR_MAX_VALUE);
+            (unit) ?
+                float(attack) / 1000000.f /* us -> s */ :
+                float(attack) / float(VM_EG_PAR_MAX_VALUE);
 
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
@@ -1212,7 +1302,11 @@ namespace LinuxSampler {
     }
 
     // change_decay() function
-    
+    //
+    //TODO: Derive from generalized, shared template class
+    // VMChangeSynthParamFunction instead (like e.g. change_cutoff_decay()
+    // implementation below already does) to ease maintenance.
+
     InstrumentScriptVMFunction_change_decay::InstrumentScriptVMFunction_change_decay(InstrumentScriptVM* parent)
         : m_vm(parent)
     {
@@ -1273,7 +1367,9 @@ namespace LinuxSampler {
             decay = 0;
         }
         const float fDecay =
-            (unit) ? decay : float(decay) / float(VM_EG_PAR_MAX_VALUE);
+            (unit) ?
+                float(decay) / 1000000.f /* us -> s */ :
+                float(decay) / float(VM_EG_PAR_MAX_VALUE);
 
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
@@ -1342,7 +1438,11 @@ namespace LinuxSampler {
     }
 
     // change_release() function
-    
+    //
+    //TODO: Derive from generalized, shared template class
+    // VMChangeSynthParamFunction instead (like e.g. change_cutoff_release()
+    // implementation below already does) to ease maintenance.
+
     InstrumentScriptVMFunction_change_release::InstrumentScriptVMFunction_change_release(InstrumentScriptVM* parent)
         : m_vm(parent)
     {
@@ -1403,7 +1503,9 @@ namespace LinuxSampler {
             release = 0;
         }
         const float fRelease =
-            (unit) ? release : float(release) / float(VM_EG_PAR_MAX_VALUE);
+            (unit) ?
+                float(release) / 1000000.f /* us -> s */ :
+                float(release) / float(VM_EG_PAR_MAX_VALUE);
 
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
@@ -1735,7 +1837,7 @@ namespace LinuxSampler {
                     &NoteBase::_Override::AmpLFODepth,
                     Event::synth_param_amp_lfo_depth,
                     /* if value passed without unit */
-                    0, 1000000, true,
+                    0, NO_LIMIT, true,
                     /* not used (since this function does not accept unit) */
                     NO_LIMIT, NO_LIMIT, VM_NO_PREFIX>( args, "change_amp_lfo_depth" );
     }
@@ -1748,7 +1850,7 @@ namespace LinuxSampler {
                     &NoteBase::_Override::AmpLFOFreq,
                     Event::synth_param_amp_lfo_freq,
                     /* if value passed without unit */
-                    0, 1000000, true,
+                    0, NO_LIMIT, true,
                     /* if value passed with 'Hz' unit */
                     0, 30000, VM_NO_PREFIX>( args, "change_amp_lfo_freq" );
     }
@@ -1761,7 +1863,7 @@ namespace LinuxSampler {
                     &NoteBase::_Override::CutoffLFODepth,
                     Event::synth_param_cutoff_lfo_depth,
                     /* if value passed without unit */
-                    0, 1000000, true,
+                    0, NO_LIMIT, true,
                     /* not used (since this function does not accept unit) */
                     NO_LIMIT, NO_LIMIT, VM_NO_PREFIX>( args, "change_cutoff_lfo_depth" );
     }
@@ -1774,7 +1876,7 @@ namespace LinuxSampler {
                     &NoteBase::_Override::CutoffLFOFreq,
                     Event::synth_param_cutoff_lfo_freq,
                     /* if value passed without unit */
-                    0, 1000000, true,
+                    0, NO_LIMIT, true,
                     /* if value passed with 'Hz' unit */
                     0, 30000, VM_NO_PREFIX>( args, "change_cutoff_lfo_freq" );
     }
@@ -1787,7 +1889,7 @@ namespace LinuxSampler {
                     &NoteBase::_Override::PitchLFODepth,
                     Event::synth_param_pitch_lfo_depth,
                     /* if value passed without unit */
-                    0, 1000000, true,
+                    0, NO_LIMIT, true,
                     /* not used (since this function does not accept unit) */
                     NO_LIMIT, NO_LIMIT, VM_NO_PREFIX>( args, "change_pitch_lfo_depth" );
     }
@@ -1800,7 +1902,7 @@ namespace LinuxSampler {
                     &NoteBase::_Override::PitchLFOFreq,
                     Event::synth_param_pitch_lfo_freq,
                     /* if value passed without unit */
-                    0, 1000000, true,
+                    0, NO_LIMIT, true,
                     /* if value passed with 'Hz' unit */
                     0, 30000, VM_NO_PREFIX>( args, "change_pitch_lfo_freq" );
     }
@@ -2236,7 +2338,7 @@ namespace LinuxSampler {
                     e.Type = Event::type_kill_note;
                     e.Param.Note.ID = id.noteID();
                     e.Param.Note.Key = pNote->hostKey;
-                    
+
                     pEngineChannel->ScheduleEventMicroSec(&e, duration + 1);
                 }
             }
@@ -2570,7 +2672,7 @@ namespace LinuxSampler {
 
     InstrumentScriptVMFunction_wait::InstrumentScriptVMFunction_wait(InstrumentScriptVM* parent)
         : CoreVMFunction_wait(parent)
-    {    
+    {
     }
 
     VMFnResult* InstrumentScriptVMFunction_wait::exec(VMFnArgs* args) {
@@ -2586,7 +2688,7 @@ namespace LinuxSampler {
 
     InstrumentScriptVMFunction_stop_wait::InstrumentScriptVMFunction_stop_wait(InstrumentScriptVM* parent)
         : m_vm(parent)
-    {    
+    {
     }
 
     VMFnResult* InstrumentScriptVMFunction_stop_wait::exec(VMFnArgs* args) {

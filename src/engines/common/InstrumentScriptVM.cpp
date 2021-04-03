@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 - 2019 Christian Schoenebeck
+ * Copyright (c) 2014 - 2021 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -42,6 +42,8 @@ namespace LinuxSampler {
                 if (!pEngine->EventByID(eventID)) firstDead = i;
             }
         }
+        if (firstDead >= 0)
+            remove(firstDead, size() - firstDead);
 
         append(eventID);
     }
@@ -61,6 +63,8 @@ namespace LinuxSampler {
         handlerNote = NULL;
         handlerRelease = NULL;
         handlerController = NULL;
+        handlerRpn = NULL;
+        handlerNrpn = NULL;
         pEvents = NULL;
         for (int i = 0; i < 128; ++i)
             pKeyEvents[i] = NULL;
@@ -86,8 +90,11 @@ namespace LinuxSampler {
      * channels.
      *
      * @param text - source code of script
+     * @param patchVars - 'patch' variables being overridden by instrument
      */
-    void InstrumentScript::load(const String& text) {
+    void InstrumentScript::load(const String& text,
+                                const std::map<String,String>& patchVars)
+    {
         dmsg(1,("Loading real-time instrument script ... "));
 
         // hand back old script reference and VM execution contexts
@@ -100,7 +107,9 @@ namespace LinuxSampler {
             dynamic_cast<AbstractInstrumentManager*>(pEngineChannel->pEngine->GetInstrumentManager());
 
         // get new script reference
-        parserContext = pManager->scripts.Borrow(text, pEngineChannel);
+        parserContext = pManager->scripts.Borrow(
+            { .code = text, .patchVars = patchVars }, pEngineChannel
+        );
         if (!parserContext->errors().empty()) {
             std::vector<ParserIssue> errors = parserContext->errors();
             std::cerr << "[ScriptVM] Could not load instrument script, there were "
@@ -114,12 +123,16 @@ namespace LinuxSampler {
         handlerNote = parserContext->eventHandlerByName("note");
         handlerRelease = parserContext->eventHandlerByName("release");
         handlerController = parserContext->eventHandlerByName("controller");
+        handlerRpn = parserContext->eventHandlerByName("rpn");
+        handlerNrpn = parserContext->eventHandlerByName("nrpn");
         bHasValidScript =
-            handlerInit || handlerNote || handlerRelease || handlerController;
+            handlerInit || handlerNote || handlerRelease || handlerController ||
+            handlerRpn || handlerNrpn;
 
         // amount of script handlers each script event has to execute
         int handlerExecCount = 0;
-        if (handlerNote || handlerRelease || handlerController) // only one of these are executed after "init" handler
+        if (handlerNote || handlerRelease || handlerController || handlerRpn ||
+            handlerNrpn) // only one of these are executed after "init" handler
             handlerExecCount++;
 
         // create script event pool (if it doesn't exist already)
@@ -133,8 +146,8 @@ namespace LinuxSampler {
                 RTList<ScriptEvent>::Iterator it = pEvents->allocAppend();
                 it->reset();
             }
-            pEvents->clear();
         }
+        pEvents->clear(); // outside of upper block, as loop below must always start from cleared list
 
         // create new VM execution contexts for new script
         while (!pEvents->poolIsEmpty()) {
@@ -173,12 +186,14 @@ namespace LinuxSampler {
             pEvents->clear();
             while (!pEvents->poolIsEmpty()) {
                 RTList<ScriptEvent>::Iterator it = pEvents->allocAppend();
+                if (!it) break;
                 if (it->execCtx) {
                     // free VM execution context object
                     delete it->execCtx;
                     it->execCtx = NULL;
                     // free C array of handler pointers
                     delete [] it->handlers;
+                    it->handlers = NULL;
                 }
             }
             pEvents->clear();
@@ -194,6 +209,8 @@ namespace LinuxSampler {
             handlerNote = NULL;
             handlerRelease = NULL;
             handlerController = NULL;
+            handlerRpn = NULL;
+            handlerNrpn = NULL;
         }
         bHasValidScript = false;
     }
@@ -229,6 +246,7 @@ namespace LinuxSampler {
 
     InstrumentScriptVM::InstrumentScriptVM() :
         m_event(NULL), m_fnPlayNote(this), m_fnSetController(this),
+        m_fnSetRpn(this), m_fnSetNrpn(this),
         m_fnIgnoreEvent(this), m_fnIgnoreController(this), m_fnNoteOff(this),
         m_fnSetEventMark(this), m_fnDeleteEventMark(this), m_fnByMarks(this),
         m_fnChangeVol(this), m_fnChangeVolTime(this),
@@ -255,6 +273,8 @@ namespace LinuxSampler {
         m_EVENT_ID = DECLARE_VMINT_READONLY(m_event, class ScriptEvent, id);
         m_EVENT_NOTE = DECLARE_VMINT_READONLY(m_event, class ScriptEvent, cause.Param.Note.Key);
         m_EVENT_VELOCITY = DECLARE_VMINT_READONLY(m_event, class ScriptEvent, cause.Param.Note.Velocity);
+        m_RPN_ADDRESS = DECLARE_VMINT_READONLY(m_event, class ScriptEvent, cause.Param.RPN.Parameter);
+        m_RPN_VALUE = DECLARE_VMINT_READONLY(m_event, class ScriptEvent, cause.Param.RPN.Value);
         m_KEY_DOWN.size = 128;
         m_KEY_DOWN.readonly = true;
         m_NI_CALLBACK_TYPE = DECLARE_VMINT_READONLY(m_event, class ScriptEvent, handlerType);
@@ -329,6 +349,8 @@ namespace LinuxSampler {
         m["$EVENT_NOTE"] = &m_EVENT_NOTE;
         m["$EVENT_VELOCITY"] = &m_EVENT_VELOCITY;
 //         m["$POLY_AT_NUM"] = &m_POLY_AT_NUM;
+        m["$RPN_ADDRESS"] = &m_RPN_ADDRESS; // used for both RPN and NRPN events
+        m["$RPN_VALUE"] = &m_RPN_VALUE;     // used for both RPN and NRPN events
         m["$NI_CALLBACK_TYPE"] = &m_NI_CALLBACK_TYPE;
         m["$NKSP_IGNORE_WAIT"] = &m_NKSP_IGNORE_WAIT;
         m["$NKSP_CALLBACK_PARENT_ID"] = &m_NKSP_CALLBACK_PARENT_ID;
@@ -392,6 +414,8 @@ namespace LinuxSampler {
         // built-in script functions of this class
         if      (name == "play_note") return &m_fnPlayNote;
         else if (name == "set_controller") return &m_fnSetController;
+        else if (name == "set_rpn") return &m_fnSetRpn;
+        else if (name == "set_nrpn") return &m_fnSetNrpn;
         else if (name == "ignore_event") return &m_fnIgnoreEvent;
         else if (name == "ignore_controller") return &m_fnIgnoreController;
         else if (name == "note_off") return &m_fnNoteOff;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Christian Schoenebeck
+ * Copyright (c) 2019 - 2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -25,6 +25,58 @@
 # define TEST_ASSERT assert
 #endif
 
+#define TEST_VERIFY(...) \
+    if (!(__VA_ARGS__)) { \
+        fprintf(stderr, "\n[ERROR]: The following NKSP test has failed:\n%s\n", \
+               opt.code.c_str()); \
+        fprintf(stderr, "Violated expectation for this failure was: " #__VA_ARGS__ "\n\n"); \
+        fprintf(stderr, "The overall expectations for this failed NKSP test were:\n\n"); \
+        printExpectations(opt); \
+        fprintf(stderr, "\n"); \
+    } \
+    TEST_ASSERT(__VA_ARGS__); \
+
+#define TEST_PRINT_BOOL_EXPECTATION(e) \
+    printf(#e ": %s\n", (opt.e) ? "Yes" : "No"); \
+
+#define TEST_PRINT_BOOL_EXPECTATION_OR(e,alt) \
+    printf(#e ": %s", (opt.e || opt.alt) ? "Yes" : "No"); \
+    if (!opt.e && opt.alt) { \
+        printf(" (implied by " #alt ")"); \
+    } \
+    printf("\n"); \
+
+#define TEST_PRINT_BOOL_EXPECTATION_OR2(e,alt1,alt2) \
+    printf(#e ": %s", (opt.e || opt.alt1 || opt.alt2) ? "Yes" : "No"); \
+    if (!opt.e) { \
+        if (opt.alt1 && opt.alt2) { \
+            printf(" (implied by " #alt1 " and " #alt2 ")"); \
+        } else if (opt.alt1) { \
+            printf(" (implied by " #alt1 ")"); \
+        } else if (opt.alt2) { \
+            printf(" (implied by " #alt2 ")"); \
+        } \
+    } \
+    printf("\n"); \
+
+#define TEST_PRINT_OPTIONAL_EXPECTATION(e) \
+    printf(#e ": %s\n", \
+           (opt.e) ? std::to_string(*opt.e).c_str() : "Not expected"); \
+
+#define TEST_PRINT_OPTIONAL_STRING_EXPECTATION(e) \
+    printf(#e ": %s\n", \
+           (opt.e) ? ("'" + *opt.e + "'").c_str() : "Not expected"); \
+
+#define TEST_PRINT_VECTOR_EXPECTATION(e) \
+    if (opt.e.empty()) { \
+        printf(#e ": Not expected\n"); \
+    } else { \
+        for (size_t i = 0; i < opt.e.size(); ++i) { \
+            printf(#e ": %s\n", std::to_string(opt.e[i]).c_str()); \
+            if (i < opt.e.size() - 1) printf(", "); \
+        } \
+    } \
+
 using namespace LinuxSampler;
 using namespace std;
 
@@ -46,6 +98,23 @@ struct RunScriptOpt {
     optional<bool> expectExitResultFinal;
 };
 
+static void printExpectations(RunScriptOpt opt) {
+    TEST_PRINT_BOOL_EXPECTATION(expectParseError);
+    TEST_PRINT_BOOL_EXPECTATION(expectParseWarning);
+    TEST_PRINT_BOOL_EXPECTATION(expectRuntimeError);
+    TEST_PRINT_BOOL_EXPECTATION(expectNoExitResult);
+    TEST_PRINT_BOOL_EXPECTATION_OR2(expectExitResultIsInt, /* Or: */ expectIntExitResult, expectBoolExitResult);
+    TEST_PRINT_BOOL_EXPECTATION_OR(expectExitResultIsReal, /* Or: */ expectRealExitResult);
+    TEST_PRINT_BOOL_EXPECTATION(prohibitExitFunctionArguments);
+    TEST_PRINT_OPTIONAL_EXPECTATION(expectIntExitResult);
+    TEST_PRINT_OPTIONAL_EXPECTATION(expectBoolExitResult);
+    TEST_PRINT_OPTIONAL_EXPECTATION(expectRealExitResult);
+    TEST_PRINT_OPTIONAL_STRING_EXPECTATION(expectStringExitResult);
+    TEST_PRINT_VECTOR_EXPECTATION(expectExitResultUnitPrefix);
+    TEST_PRINT_OPTIONAL_EXPECTATION(expectExitResultUnit);
+    TEST_PRINT_OPTIONAL_EXPECTATION(expectExitResultFinal);
+}
+
 static void runScript(const RunScriptOpt& opt) {
     ScriptVM vm;
     vm.setAutoSuspendEnabled(false);
@@ -57,22 +126,22 @@ static void runScript(const RunScriptOpt& opt) {
     vector<ParserIssue> errors = parserCtx->errors();
     vector<ParserIssue> warnings = parserCtx->warnings();
     if (opt.expectParseError) {
-        TEST_ASSERT(!errors.empty());
+        TEST_VERIFY(!errors.empty());
         return;
     } else {
         for (ParserIssue& err : errors) {
             err.dump();
         }
-        TEST_ASSERT(errors.empty());
+        TEST_VERIFY(errors.empty());
     }
     if (opt.expectParseWarning) {
-        TEST_ASSERT(!warnings.empty());
+        TEST_VERIFY(!warnings.empty());
     } else {
         for (ParserIssue& wrn : warnings) {
             wrn.dump();
         }
     }
-    TEST_ASSERT(parserCtx->eventHandler(0));
+    TEST_VERIFY(parserCtx->eventHandler(0));
     unique_ptr<VMExecContext> execCtx(
         vm.createExecContext(&*parserCtx)
     );
@@ -80,81 +149,81 @@ static void runScript(const RunScriptOpt& opt) {
         VMEventHandler* handler = parserCtx->eventHandler(i);
         VMExecStatus_t result = vm.exec(&*parserCtx, &*execCtx, handler);
         if (opt.expectRuntimeError) {
-            TEST_ASSERT(result & VM_EXEC_ERROR);
+            TEST_VERIFY(result & VM_EXEC_ERROR);
         } else {
-            TEST_ASSERT(!(result & VM_EXEC_ERROR));
+            TEST_VERIFY(!(result & VM_EXEC_ERROR));
         }
         if (opt.expectNoExitResult) {
             VMExpr* resExpr = execCtx->exitResult();
-            TEST_ASSERT(!resExpr);
+            TEST_VERIFY(!resExpr);
         }
         if (opt.expectExitResultIsInt) {
             VMExpr* resExpr = execCtx->exitResult();
-            TEST_ASSERT(resExpr);
-            TEST_ASSERT(resExpr->exprType() == INT_EXPR);
+            TEST_VERIFY(resExpr);
+            TEST_VERIFY(resExpr->exprType() == INT_EXPR);
         }
         if (opt.expectExitResultIsReal) {
             VMExpr* resExpr = execCtx->exitResult();
-            TEST_ASSERT(resExpr);
-            TEST_ASSERT(resExpr->exprType() == REAL_EXPR);
+            TEST_VERIFY(resExpr);
+            TEST_VERIFY(resExpr->exprType() == REAL_EXPR);
         }
         if (opt.expectIntExitResult) {
             VMExpr* resExpr = execCtx->exitResult();
-            TEST_ASSERT(resExpr);
-            TEST_ASSERT(resExpr->exprType() == INT_EXPR);
-            TEST_ASSERT(resExpr->asInt()->evalInt() == *opt.expectIntExitResult);
+            TEST_VERIFY(resExpr);
+            TEST_VERIFY(resExpr->exprType() == INT_EXPR);
+            TEST_VERIFY(resExpr->asInt()->evalInt() == *opt.expectIntExitResult);
         }
         if (opt.expectRealExitResult) {
             VMExpr* resExpr = execCtx->exitResult();
-            TEST_ASSERT(resExpr);
-            TEST_ASSERT(resExpr->exprType() == REAL_EXPR);
+            TEST_VERIFY(resExpr);
+            TEST_VERIFY(resExpr->exprType() == REAL_EXPR);
             if (sizeof(vmfloat) == sizeof(float)) {
-                TEST_ASSERT(RTMath::fEqual32(resExpr->asReal()->evalReal(), *opt.expectRealExitResult));
+                TEST_VERIFY(RTMath::fEqual32(resExpr->asReal()->evalReal(), *opt.expectRealExitResult));
             } else {
-                TEST_ASSERT(RTMath::fEqual64(resExpr->asReal()->evalReal(), *opt.expectRealExitResult));
+                TEST_VERIFY(RTMath::fEqual64(resExpr->asReal()->evalReal(), *opt.expectRealExitResult));
             }
         }
         if (opt.expectBoolExitResult) {
             VMExpr* resExpr = execCtx->exitResult();
-            TEST_ASSERT(resExpr);
-            TEST_ASSERT(resExpr->exprType() == INT_EXPR);
-            TEST_ASSERT(bool(resExpr->asInt()->evalInt()) == *opt.expectBoolExitResult);
+            TEST_VERIFY(resExpr);
+            TEST_VERIFY(resExpr->exprType() == INT_EXPR);
+            TEST_VERIFY(bool(resExpr->asInt()->evalInt()) == *opt.expectBoolExitResult);
         }
         if (opt.expectStringExitResult) {
             VMExpr* resExpr = execCtx->exitResult();
-            TEST_ASSERT(resExpr);
-            TEST_ASSERT(resExpr->exprType() == STRING_EXPR);
-            TEST_ASSERT(resExpr->asString()->evalStr() == *opt.expectStringExitResult);
+            TEST_VERIFY(resExpr);
+            TEST_VERIFY(resExpr->exprType() == STRING_EXPR);
+            TEST_VERIFY(resExpr->asString()->evalStr() == *opt.expectStringExitResult);
         }
         if (opt.expectExitResultUnit) {
             VMExpr* resExpr = execCtx->exitResult();
-            TEST_ASSERT(resExpr);
+            TEST_VERIFY(resExpr);
             VMNumberExpr* numberExpr = resExpr->asNumber();
-            TEST_ASSERT(numberExpr);
-            TEST_ASSERT(numberExpr->unitType() == *opt.expectExitResultUnit);
+            TEST_VERIFY(numberExpr);
+            TEST_VERIFY(numberExpr->unitType() == *opt.expectExitResultUnit);
         }
         if (!opt.expectExitResultUnitPrefix.empty()) {
             VMExpr* resExpr = execCtx->exitResult();
-            TEST_ASSERT(resExpr);
+            TEST_VERIFY(resExpr);
             VMNumberExpr* numberExpr = resExpr->asNumber();
-            TEST_ASSERT(numberExpr);
+            TEST_VERIFY(numberExpr);
             auto prefixes = opt.expectExitResultUnitPrefix;
             if (*prefixes.rbegin() != VM_NO_PREFIX)
                 prefixes.push_back(VM_NO_PREFIX); // VM_NO_PREFIX termination required by unitFactr() call
             vmfloat expectedFactor = VMUnit::unitFactor(&prefixes[0]);
             vmfloat actualFactor = numberExpr->unitFactor();
             if (sizeof(vmfloat) == sizeof(float)) {
-                TEST_ASSERT(RTMath::fEqual32(expectedFactor, actualFactor));
+                TEST_VERIFY(RTMath::fEqual32(expectedFactor, actualFactor));
             } else {
-                TEST_ASSERT(RTMath::fEqual64(expectedFactor, actualFactor));
+                TEST_VERIFY(RTMath::fEqual64(expectedFactor, actualFactor));
             }
         }
         if (opt.expectExitResultFinal) {
             VMExpr* resExpr = execCtx->exitResult();
-            TEST_ASSERT(resExpr);
+            TEST_VERIFY(resExpr);
             VMNumberExpr* numberExpr = resExpr->asNumber();
-            TEST_ASSERT(numberExpr);
-            TEST_ASSERT(numberExpr->isFinal() == *opt.expectExitResultFinal);
+            TEST_VERIFY(numberExpr);
+            TEST_VERIFY(numberExpr->isFinal() == *opt.expectExitResultFinal);
         }
     }
 }
@@ -1006,6 +1075,74 @@ end on
         .expectParseError = true // assigning final to a non-final variable not allowed
     });
 
+    // exit() acting as return statement ...
+
+    runScript({
+        .code = R"NKSP_CODE(
+function doFoo
+  exit(2)  { just return from this user function, i.e. don't stop init handler }
+end function
+
+on init
+  call doFoo
+  exit(3)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 3
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+function doFoo1
+  exit(2)  { just return from this user function, i.e. don't stop init handler }
+end function
+
+function doFoo2
+  call doFoo1
+  exit(3)  { just return from this user function, i.e. don't stop init handler }
+end function
+
+on init
+  call doFoo2
+  exit(4)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 4
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+function doFoo
+  exit(2)  { just return from this user function, i.e. don't stop init handler }
+end function
+
+on init
+  call doFoo
+  exit(3)
+  { dead code ... }
+  call doFoo
+  exit(4)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 3
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+function doFoo
+  exit(2)  { just return from this user function, i.e. don't stop init handler }
+end function
+
+on init
+  call doFoo
+  exit(3)
+  { dead code ... }
+  call doFoo
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 3
+    });
+
     #if !SILENT_TEST
     std::cout << std::endl;
     #endif
@@ -1254,6 +1391,27 @@ end on
         .expectExitResultFinal = false
     });
 
+    // string tests ...
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit(-"text")
+end on
+)NKSP_CODE",
+        .expectParseError = true // unary '-' operator requires number
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare @s := "text"
+  exit(-@s)
+end on
+)NKSP_CODE",
+        .expectParseError = true // unary '-' operator requires number
+    });
+
     //TODO: the following are unary '+' operator tests which should be moved to their own function (lazy me).
 
     runScript({
@@ -1292,6 +1450,27 @@ on init
 end on
 )NKSP_CODE",
         .expectRealExitResult = 0.29
+    });
+
+    // string tests ...
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit(+"text")
+end on
+)NKSP_CODE",
+        .expectParseError = true // unary '+' operator requires number
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare @s := "text"
+  exit(+@s)
+end on
+)NKSP_CODE",
+        .expectParseError = true // unary '+' operator requires number
     });
 
     #if !SILENT_TEST
@@ -2095,6 +2274,32 @@ end on
         .expectExitResultUnit = VM_SECOND
     });
 
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~foo := 1.0  { neutral }
+  declare $bar := 7000ms
+  exit(~foo * real($bar))
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 7000.0,
+        .expectExitResultUnitPrefix = { VM_MILLI },
+        .expectExitResultUnit = VM_SECOND
+    });
+
+ runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $foo := 1  { neutral }
+  declare $bar := 7000ms
+  exit(real($foo) * real($bar))
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 7000.0,
+        .expectExitResultUnitPrefix = { VM_MILLI },
+        .expectExitResultUnit = VM_SECOND
+    });
+
     // 'final' ('!') operator tests ...
 
     runScript({
@@ -2350,6 +2555,19 @@ on init
 end on
 )NKSP_CODE",
         .expectParseError = true // unit types are not matching
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $foo := 1000000
+  declare $bar := 7000ms
+  exit(real($foo) / 1000000.0 * real($bar))
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 7000.0,
+        .expectExitResultUnitPrefix = { VM_MILLI },
+        .expectExitResultUnit = VM_SECOND
     });
 
     // 'final' ('!') operator tests ...
@@ -5413,6 +5631,1620 @@ end on
     #endif
 }
 
+static void testIntVarDeclaration() {
+    #if !SILENT_TEST
+    std::cout << "UNIT TEST: int var declaration\n";
+    #endif
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $a
+  exit($a)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 0
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $a := 24
+  exit($a)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $a := 24
+  $a := 8
+  exit($a)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 8
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $a
+  declare $a
+end on
+)NKSP_CODE",
+        .expectParseError = true // variable re-declaration
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const $a
+end on
+)NKSP_CODE",
+        .expectParseError = true // const variable declaration without assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const $a := 24
+  exit($a)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const $a := 24
+  $a := 8
+end on
+)NKSP_CODE",
+        .expectParseError = true // attempt to modify const variable
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const $a := 24
+  declare const $b := $a
+  exit($b)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $a := 24
+  declare const $b := $a
+end on
+)NKSP_CODE",
+        .expectParseError = true // const variable defined with non-const assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic $a
+  exit($a)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 0
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const polyphonic $a
+end on
+)NKSP_CODE",
+        .expectParseError = true // combination of qualifiers 'const' and 'polyphonic' is pointless
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic const $a
+end on
+)NKSP_CODE",
+        .expectParseError = true // combination of qualifiers 'const' and 'polyphonic' is pointless
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const polyphonic $a := 3
+end on
+)NKSP_CODE",
+        .expectParseError = true // combination of qualifiers 'const' and 'polyphonic' is pointless
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic const $a := 3
+end on
+)NKSP_CODE",
+        .expectParseError = true // combination of qualifiers 'const' and 'polyphonic' is pointless
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~a := 24
+  exit(~a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // real type declaration vs. int value assignment
+        .expectIntExitResult = 24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a := 24
+  exit(%a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // int array type declaration vs. int scalar value assignment
+        .expectIntExitResult = 24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a := 24
+  exit(%a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // int array type declaration vs. int scalar value assignment
+        .expectIntExitResult = 24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a := 24
+  exit(?a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // real array type declaration vs. int scalar value assignment
+        .expectIntExitResult = 24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ?a := 24
+  exit(?a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // real array type declaration vs. int scalar value assignment
+        .expectIntExitResult = 24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare @a := 24
+  exit(@a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // string type declaration vs. int scalar value assignment
+        .expectIntExitResult = 24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const @a := 24
+  exit(@a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // string type declaration vs. int scalar value assignment
+        .expectIntExitResult = 24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $a := ( 0, 1, 2 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // int scalar type declaration vs. int array value assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const $a := ( 0, 1, 2 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // int scalar type declaration vs. int array value assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare a
+end on
+)NKSP_CODE",
+        .expectParseError = true // missing type prefix character in variable name
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare a := 24
+end on
+)NKSP_CODE",
+        .expectParseError = true // missing type prefix character in variable name
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const a := 24
+end on
+)NKSP_CODE",
+        .expectParseError = true // missing type prefix character in variable name
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic a
+end on
+)NKSP_CODE",
+        .expectParseError = true // missing type prefix character in variable name
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $a := max(8,24)
+  exit($a)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $a := abort($NI_CALLBACK_ID)
+end on
+)NKSP_CODE",
+        .expectParseError = true // assigned expression does not result in a value
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const $a := abort($NI_CALLBACK_ID)
+end on
+)NKSP_CODE",
+        .expectParseError = true // assigned expression does not result in a value
+    });
+
+    #if !SILENT_TEST
+    std::cout << std::endl;
+    #endif
+}
+
+static void testIntArrayVarDeclaration() {
+    #if !SILENT_TEST
+    std::cout << "UNIT TEST: int array var declaration\n";
+    #endif
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3]
+  exit( %a[0] + %a[1] + %a[2] )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 0
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[0]
+end on
+)NKSP_CODE",
+        .expectParseWarning = true // unusable array size
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[-1]
+end on
+)NKSP_CODE",
+        .expectParseError = true // illegal array size
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3] := ( 1, 2, 3 )
+  exit( %a[0] + %a[1] + %a[2] )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = (1 + 2 + 3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[4] := ( 1, 2, 3 )
+  exit( %a[0] + %a[1] + %a[2] + %a[3] )
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // less values assigned than array size declared
+        .expectIntExitResult = (1 + 2 + 3 + 0)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[] := ( 1, 2, 3 )
+  exit( %a[0] + %a[1] + %a[2] )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = (1 + 2 + 3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[]
+end on
+)NKSP_CODE",
+        .expectParseWarning = true // unusable array size (zero)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const $sz := 3
+  declare %a[$sz] := ( 1, 2, 3 )
+  exit( %a[0] + %a[1] + %a[2] )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = (1 + 2 + 3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const $sz := 3
+  declare const %a[$sz] := ( 1, 2, 3 )
+  exit( %a[0] + %a[1] + %a[2] )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = (1 + 2 + 3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $sz := 3
+  declare %a[$sz] := ( 1, 2, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // array size must be constant expression
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $sz := 3
+  declare const %a[$sz] := ( 1, 2, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // array size must be constant expression
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ~sz := 3.0
+  declare const %a[~sz] := ( 1, 2, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // array size must be integer type
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3s] := ( 1, 2, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // units not allowed for array size
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3m] := ( 1, 2, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // units not allowed for array size
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a[!3] := ( 1, 2, 3 )
+  exit( %a[0] + %a[1] + %a[2] )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = (1 + 2 + 3),
+        .expectParseWarning = true // 'final' operator is meaningless for array size
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3] := ( 1, 2, 3 )
+  %a[0] := 4
+  %a[1] := 5
+  %a[2] := 6
+  exit( %a[0] + %a[1] + %a[2] )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = (4 + 5 + 6)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3]
+  declare %a[3]
+end on
+)NKSP_CODE",
+        .expectParseError = true // variable re-declaration
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a[3]
+end on
+)NKSP_CODE",
+        .expectParseError = true // const variable declaration without assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a[3] := ( 1, 2, 3 )
+  exit( %a[0] + %a[1] + %a[2] )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = (1 + 2 + 3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a[3] := ( 1, 2, 3, 4 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // incompatible array sizes
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a[3] := ( 1, 2, 3 )
+  %a[0] := 8
+end on
+)NKSP_CODE",
+        .expectParseError = true // attempt to modify const variable
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a[3] := ( 1, 2, 3 )
+  declare const %b[3] := ( %a[0], %a[1], %a[2] )
+  exit( %b[0] + %b[1] + %b[2] )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = (1 + 2 + 3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3] := ( 1, 2, 3 )
+  declare const %b[3] := ( %a[0], %a[1], %a[2] )
+end on
+)NKSP_CODE",
+        .expectParseError = true // const array defined with non-const assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic %a[3]
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic %a[3] := ( 1, 2, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const polyphonic %a[3]
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const polyphonic %a[3] := ( 1, 2, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic const %a[3]
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic const %a[3] := ( 1, 2, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3] := ( 1, max(8,24), 3 )
+  exit( %a[0] + %a[1] + %a[2] )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = ( 1 + 24 + 3 )
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3] := ( 1, abort($NI_CALLBACK_ID), 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // assigned expression does not result in a value
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a[3] := ( 1, abort($NI_CALLBACK_ID), 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // assigned expression does not result in a value
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3] := ( 1.0, 2.0, 3.0 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // int array declaration vs. real array assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3] := ( 1, 2, 3.0 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // 3rd element not an integer
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a[3] := ( "x", "y", "z" )
+end on
+)NKSP_CODE",
+        .expectParseError = true // int array declaration vs. string array assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare a[3] := ( 1, 2, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // missing type prefix character in variable name
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare a[3]
+end on
+)NKSP_CODE",
+        .expectParseError = true // missing type prefix character in variable name
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a[3] := ( 1, 2s, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // unit types not allowed for arrays
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a[3] := ( 1, !2, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // 'final' not allowed for arrays
+    });
+
+    #if !SILENT_TEST
+    std::cout << std::endl;
+    #endif
+}
+
+static void testRealVarDeclaration() {
+    #if !SILENT_TEST
+    std::cout << "UNIT TEST: real var declaration\n";
+    #endif
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~a
+  exit(~a)
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 0.0
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~a := 24.8
+  exit(~a)
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 24.8
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~a := 8.24
+  ~a := 24.8
+  exit(~a)
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 24.8
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~a
+  declare ~a
+end on
+)NKSP_CODE",
+        .expectParseError = true // variable re-declaration
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ~a
+end on
+)NKSP_CODE",
+        .expectParseError = true // const variable declaration without assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ~a := 8.24
+  exit(~a)
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 8.24
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ~a := 28.0
+  ~a := 8.0
+end on
+)NKSP_CODE",
+        .expectParseError = true // attempt to modify const variable
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ~a := 24.8
+  declare const ~b := ~a
+  exit(~b)
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 24.8
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~a := 24.0
+  declare const ~b := ~a
+end on
+)NKSP_CODE",
+        .expectParseError = true // const variable defined with non-const assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic ~a
+  exit(~a)
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 0.0
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const polyphonic ~a
+end on
+)NKSP_CODE",
+        .expectParseError = true // combination of qualifiers 'const' and 'polyphonic' is pointless
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic const ~a
+end on
+)NKSP_CODE",
+        .expectParseError = true // combination of qualifiers 'const' and 'polyphonic' is pointless
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const polyphonic ~a := 3.0
+end on
+)NKSP_CODE",
+        .expectParseError = true // combination of qualifiers 'const' and 'polyphonic' is pointless
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic const ~a := 3.0
+end on
+)NKSP_CODE",
+        .expectParseError = true // combination of qualifiers 'const' and 'polyphonic' is pointless
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $a := 24.8
+  exit($a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // int type declaration vs. real value assignment
+        .expectRealExitResult = 24.8
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a := 24.8
+  exit(%a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // int array type declaration vs. real scalar value assignment
+        .expectRealExitResult = 24.8
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a := 24.8
+  exit(%a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // int array type declaration vs. real scalar value assignment
+        .expectRealExitResult = 24.8
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a := 24.8
+  exit(?a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // real array type declaration vs. real scalar value assignment
+        .expectRealExitResult = 24.8
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ?a := 24.8
+  exit(?a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // real array type declaration vs. real scalar value assignment
+        .expectRealExitResult = 24.8
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare @a := 24.8
+  exit(@a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // string type declaration vs. real scalar value assignment
+        .expectRealExitResult = 24.8
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const @a := 24.8
+  exit(@a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // string type declaration vs. real scalar value assignment
+        .expectRealExitResult = 24.8
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~a := ( 0, 1, 2 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // real scalar type declaration vs. int array value assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ~a := ( 0, 1, 2 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // real scalar type declaration vs. int array value assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare a := 24.8
+end on
+)NKSP_CODE",
+        .expectParseError = true // missing type prefix character in variable name
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const a := 24.8
+end on
+)NKSP_CODE",
+        .expectParseError = true // missing type prefix character in variable name
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~a := max(8.1,24.2)
+  exit(~a)
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 24.2
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~a := abort($NI_CALLBACK_ID)
+end on
+)NKSP_CODE",
+        .expectParseError = true // assigned expression does not result in a value
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ~a := abort($NI_CALLBACK_ID)
+end on
+)NKSP_CODE",
+        .expectParseError = true // assigned expression does not result in a value
+    });
+
+    #if !SILENT_TEST
+    std::cout << std::endl;
+    #endif
+}
+
+static void testRealArrayVarDeclaration() {
+    #if !SILENT_TEST
+    std::cout << "UNIT TEST: real array var declaration\n";
+    #endif
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3]
+  exit( ?a[0] + ?a[1] + ?a[2] )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 0.0
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[0]
+end on
+)NKSP_CODE",
+        .expectParseWarning = true // unusable array size
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[-1]
+end on
+)NKSP_CODE",
+        .expectParseError = true // illegal array size
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3] := ( 1.1, 2.2, 3.3 )
+  exit( ?a[0] + ?a[1] + ?a[2] )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = (1.1 + 2.2 + 3.3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[4] := ( 1.1, 2.2, 3.3 )
+  exit( ?a[0] + ?a[1] + ?a[2] + ?a[3] )
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // less values assigned than array size declared
+        .expectRealExitResult = (1.1 + 2.2 + 3.3 + 0.0)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[] := ( 1.1, 2.2, 3.3 )
+  exit( ?a[0] + ?a[1] + ?a[2] )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = (1.1 + 2.2 + 3.3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[]
+end on
+)NKSP_CODE",
+        .expectParseWarning = true // unusable array size (zero)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const $sz := 3
+  declare ?a[$sz] := ( 1.1, 2.2, 3.3 )
+  exit( ?a[0] + ?a[1] + ?a[2] )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = (1.1 + 2.2 + 3.3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const $sz := 3
+  declare const ?a[$sz] := ( 1.1, 2.2, 3.3 )
+  exit( ?a[0] + ?a[1] + ?a[2] )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = (1.1 + 2.2 + 3.3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $sz := 3
+  declare ?a[$sz] := ( 1.1, 2.2, 3.3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // array size must be constant expression
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $sz := 3
+  declare const ?a[$sz] := ( 1.1, 2.2, 3.3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // array size must be constant expression
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ~sz := 3.0
+  declare const ?a[~sz] := ( 1.1, 2.2, 3.3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // array size must be integer type
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3s] := ( 1.1, 2.2, 3.3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // units not allowed for array size
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3m] := ( 1.1, 2.2, 3.3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // units not allowed for array size
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ?a[!3] := ( 1.1, 2.2, 3.3 )
+  exit( ?a[0] + ?a[1] + ?a[2] )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = (1.1 + 2.2 + 3.3),
+        .expectParseWarning = true // 'final' operator is meaningless for array size
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3] := ( 1.0, 2.0, 3.0 )
+  ?a[0] := 4.5
+  ?a[1] := 5.5
+  ?a[2] := 6.5
+  exit( ?a[0] + ?a[1] + ?a[2] )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = (4.5 + 5.5 + 6.5)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3]
+  declare ?a[3]
+end on
+)NKSP_CODE",
+        .expectParseError = true // variable re-declaration
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ?a[3]
+end on
+)NKSP_CODE",
+        .expectParseError = true // const variable declaration without assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ?a[3] := ( 1.1, 2.2, 3.3 )
+  exit( ?a[0] + ?a[1] + ?a[2] )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = (1.1 + 2.2 + 3.3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ?a[3] := ( 1.1, 2.2, 3.3, 4.4 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // incompatible array sizes
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ?a[3] := ( 1.0, 2.0, 3.0 )
+  ?a[0] := 8.0
+end on
+)NKSP_CODE",
+        .expectParseError = true // attempt to modify const variable
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ?a[3] := ( 1.1, 2.2, 3.3 )
+  declare const ?b[3] := ( ?a[0], ?a[1], ?a[2] )
+  exit( ?b[0] + ?b[1] + ?b[2] )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = (1.1 + 2.2 + 3.3)
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3] := ( 1.1, 2.2, 3.3 )
+  declare const ?b[3] := ( ?a[0], ?a[1], ?a[2] )
+end on
+)NKSP_CODE",
+        .expectParseError = true // const array defined with non-const assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic ?a[3]
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic ?a[3] := ( 1.0, 2.0, 3.0 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const polyphonic ?a[3]
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const polyphonic ?a[3] := ( 1.0, 2.0, 3.0 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic const ?a[3]
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic const ?a[3] := ( 1.0, 2.0, 3.0 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // polyphonic not allowed for array types
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3] := ( 1.0, max(8.3,24.6), 3.0 )
+  exit( ?a[0] + ?a[1] + ?a[2] )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = ( 1.0 + 24.6 + 3.0 )
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3] := ( 1.0, abort($NI_CALLBACK_ID), 3.0 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // assigned expression does not result in a value
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ?a[3] := ( 1.0, abort($NI_CALLBACK_ID), 3.0 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // assigned expression does not result in a value
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3] := ( 1, 2, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // real array declaration vs. int array assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3] := ( 1.0, 2.0, 3 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // 3rd element not a real value
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ?a[3] := ( "x", "y", "z" )
+end on
+)NKSP_CODE",
+        .expectParseError = true // real array declaration vs. string array assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare a[3] := ( 1.0, 2.0, 3.0 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // missing type prefix character in variable name
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ?a[3] := ( 1.0, 2.0s, 3.0 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // unit types not allowed for arrays
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ?a[3] := ( 1.0, !2.0, 3.0 )
+end on
+)NKSP_CODE",
+        .expectParseError = true // 'final' not allowed for arrays
+    });
+
+    #if !SILENT_TEST
+    std::cout << std::endl;
+    #endif
+}
+
+static void testStringVarDeclaration() {
+    #if !SILENT_TEST
+    std::cout << "UNIT TEST: string var declaration\n";
+    #endif
+
+runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare @a
+  exit(@a)
+end on
+)NKSP_CODE",
+        .expectStringExitResult = ""
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare @a := "foo"
+  exit(@a)
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "foo"
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare @a := "foo"
+  @a := "bar"
+  exit(@a)
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "bar"
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare @a
+  declare @a
+end on
+)NKSP_CODE",
+        .expectParseError = true // variable re-declaration
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const @a
+end on
+)NKSP_CODE",
+        .expectParseError = true // const variable declaration without assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const @a := "foo"
+  exit(@a)
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "foo"
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const @a := "foo"
+  @a := "bar"
+end on
+)NKSP_CODE",
+        .expectParseError = true // attempt to modify const variable
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const @a := "foo"
+  declare const @b := @a
+  exit(@b)
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "foo"
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare @a := "foo"
+  declare const @b := @a
+end on
+)NKSP_CODE",
+        .expectParseError = true // const variable defined with non-const assignment
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic @a
+end on
+)NKSP_CODE",
+        .expectParseError = true // 'polyphonic' not allowed for string type
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const polyphonic @a
+end on
+)NKSP_CODE",
+        .expectParseError = true // 'polyphonic' not allowed for string type
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic const @a
+end on
+)NKSP_CODE",
+        .expectParseError = true // 'polyphonic' not allowed for string type
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic @a = "foo"
+end on
+)NKSP_CODE",
+        .expectParseError = true // 'polyphonic' not allowed for string type
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare polyphonic const @a = "foo"
+end on
+)NKSP_CODE",
+        .expectParseError = true // 'polyphonic' not allowed for string type
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const polyphonic @a = "foo"
+end on
+)NKSP_CODE",
+        .expectParseError = true // 'polyphonic' not allowed for string type
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $a := "foo"
+  exit($a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // int type declaration vs. string assignment
+        .expectStringExitResult = "foo"
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~a := "foo"
+  exit(~a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // real type declaration vs. string assignment
+        .expectStringExitResult = "foo"
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare %a := "foo"
+  exit(%a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // int array type declaration vs. string assignment
+        .expectStringExitResult = "foo"
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const $a := "foo"
+  exit($a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // int type declaration vs. string assignment
+        .expectStringExitResult = "foo"
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const ~a := "foo"
+  exit(~a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // real type declaration vs. string assignment
+        .expectStringExitResult = "foo"
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const %a := "foo"
+  exit(%a)
+end on
+)NKSP_CODE",
+        .expectParseWarning = true, // int array type declaration vs. string assignment
+        .expectStringExitResult = "foo"
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare a := "foo"
+end on
+)NKSP_CODE",
+        .expectParseError = true // missing type prefix character in variable name
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const a := "foo"
+end on
+)NKSP_CODE",
+        .expectParseError = true // missing type prefix character in variable name
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare @a := abort($NI_CALLBACK_ID)
+end on
+)NKSP_CODE",
+        .expectParseError = true // assigned expression does not result in a value
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare const @a := abort($NI_CALLBACK_ID)
+end on
+)NKSP_CODE",
+        .expectParseError = true // assigned expression does not result in a value
+    });
+
+    #if !SILENT_TEST
+    std::cout << std::endl;
+    #endif
+}
+
 static void testBuiltInMinFunction() {
     #if !SILENT_TEST
     std::cout << "UNIT TEST: built-in min() function\n";
@@ -7141,6 +8973,143 @@ end on
     #endif
 }
 
+static void testBuiltInMsbFunction() {
+    #if !SILENT_TEST
+    std::cout << "UNIT TEST: built-in msb() function\n";
+    #endif
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( msb(0) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 0
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( msb(127) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 0
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( msb(128) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 1
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( msb(16255) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 126
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( msb(16256) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 127
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( msb(16383) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 127
+    });
+
+    #if !SILENT_TEST
+    std::cout << std::endl;
+    #endif
+}
+
+static void testBuiltInLsbFunction() {
+    #if !SILENT_TEST
+    std::cout << "UNIT TEST: built-in lsb() function\n";
+    #endif
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( lsb(0) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 0
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( lsb(1) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 1
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( lsb(126) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 126
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( lsb(127) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 127
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( lsb(128) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 0
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( lsb(16255) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 127
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( lsb(16256) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 0
+    });
+
+    #if !SILENT_TEST
+    std::cout << std::endl;
+    #endif
+}
+
 static void testBuiltInIntToRealFunction() {
     #if !SILENT_TEST
     std::cout << "UNIT TEST: built-in int_to_real() function\n";
@@ -7188,6 +9157,51 @@ end on
         .expectRealExitResult = -58.0,
         .expectExitResultUnitPrefix = { VM_MILLI, VM_DECI },
         .expectExitResultUnit = VM_BEL
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $foo := 7000ms
+  exit( int_to_real($foo) )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 7000.0,
+        .expectExitResultUnitPrefix = { VM_MILLI },
+        .expectExitResultUnit = VM_SECOND
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $foo := 7000ms
+  declare @s := "" & int_to_real($foo)
+  exit( @s )
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "7000ms",
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $foo := 700ms
+  exit( int_to_real($foo) / 7.0 )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 100.0,
+        .expectExitResultUnitPrefix = { VM_MILLI },
+        .expectExitResultUnit = VM_SECOND
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $foo := 700ms
+  exit( int_to_real($foo) / 7.0 & "" )
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "100ms"
     });
 
     // 'final' ('!') operator tests ...
@@ -7268,6 +9282,51 @@ end on
         .expectExitResultUnit = VM_BEL
     });
 
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $foo := 7000ms
+  exit( real($foo) )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 7000.0,
+        .expectExitResultUnitPrefix = { VM_MILLI },
+        .expectExitResultUnit = VM_SECOND
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $foo := 7000ms
+  declare @s := "" & real($foo)
+  exit( @s )
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "7000ms",
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $foo := 700ms
+  exit( real($foo) / 7.0 )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 100.0,
+        .expectExitResultUnitPrefix = { VM_MILLI },
+        .expectExitResultUnit = VM_SECOND
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare $foo := 700ms
+  exit( real($foo) / 7.0 & "" )
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "100ms"
+    });
+
     // 'final' ('!') operator tests ...
 
     runScript({
@@ -7335,6 +9394,51 @@ end on
         .expectExitResultUnit = VM_BEL
     });
 
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~foo := 9000.0us
+  exit( real_to_int(~foo) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 9000.0,
+        .expectExitResultUnitPrefix = { VM_MICRO },
+        .expectExitResultUnit = VM_SECOND
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~foo := 9000.0us
+  declare @s := "" & real_to_int(~foo)
+  exit( @s )
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "9000us",
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~foo := 700.0ms
+  exit( real_to_int(~foo) / 7 )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 100,
+        .expectExitResultUnitPrefix = { VM_MILLI },
+        .expectExitResultUnit = VM_SECOND
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~foo := 700.0ms
+  exit( real_to_int(~foo) / 7 & "" )
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "100ms"
+    });
+
     // 'final' ('!') operator tests ...
 
     runScript({
@@ -7400,6 +9504,51 @@ end on
         .expectIntExitResult = 8,
         .expectExitResultUnitPrefix = { VM_MILLI, VM_DECI },
         .expectExitResultUnit = VM_BEL
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~foo := 9000.0us
+  exit( int(~foo) )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 9000.0,
+        .expectExitResultUnitPrefix = { VM_MICRO },
+        .expectExitResultUnit = VM_SECOND
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~foo := 9000.0us
+  declare @s := "" & int(~foo)
+  exit( @s )
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "9000us",
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~foo := 700.0ms
+  exit( int(~foo) / 7 )
+end on
+)NKSP_CODE",
+        .expectIntExitResult = 100,
+        .expectExitResultUnitPrefix = { VM_MILLI },
+        .expectExitResultUnit = VM_SECOND
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  declare ~foo := 700.0ms
+  exit( int(~foo) / 7 & "" )
+end on
+)NKSP_CODE",
+        .expectStringExitResult = "100ms"
     });
 
     // 'final' ('!') operator tests ...
@@ -8097,6 +10246,28 @@ end on
         .expectExitResultUnit = VM_HERTZ
     });
 
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( ceil(9.4ms / 2.0) )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 5.0,
+        .expectExitResultUnitPrefix = { VM_MILLI },
+        .expectExitResultUnit = VM_SECOND
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( ceil( ceil(8.4us) / 2.0) )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 5.0,
+        .expectExitResultUnitPrefix = { VM_MICRO },
+        .expectExitResultUnit = VM_SECOND
+    });
+
     // 'final' ('!') operator tests ...
 
     runScript({
@@ -8193,6 +10364,28 @@ end on
         .expectRealExitResult = 2.0,
         .expectExitResultUnitPrefix = { VM_KILO },
         .expectExitResultUnit = VM_HERTZ
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( floor(4.4ms / 2.0) )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 2.0,
+        .expectExitResultUnitPrefix = { VM_MILLI },
+        .expectExitResultUnit = VM_SECOND
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit( floor( floor(8.4us) / 4.0) )
+end on
+)NKSP_CODE",
+        .expectRealExitResult = 2.0,
+        .expectExitResultUnitPrefix = { VM_MICRO },
+        .expectExitResultUnit = VM_SECOND
     });
 
     // 'final' ('!') operator tests ...
@@ -9618,6 +11811,137 @@ end on
     #endif
 }
 
+static void testBuiltInVars() {
+    #if !SILENT_TEST
+    std::cout << "UNIT TEST: built-in variables\n";
+    #endif
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit($NKSP_PERF_TIMER)
+end on
+)NKSP_CODE",
+        .expectExitResultIsInt = true,
+        .expectExitResultUnitPrefix = { VM_NO_PREFIX },
+        .expectExitResultUnit = VM_NO_UNIT
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit($NKSP_REAL_TIMER)
+end on
+)NKSP_CODE",
+        .expectExitResultIsInt = true,
+        .expectExitResultUnitPrefix = { VM_NO_PREFIX },
+        .expectExitResultUnit = VM_NO_UNIT
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit($KSP_TIMER)
+end on
+)NKSP_CODE",
+        .expectExitResultIsInt = true,
+        .expectExitResultUnitPrefix = { VM_NO_PREFIX },
+        .expectExitResultUnit = VM_NO_UNIT
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit(~NI_MATH_PI)
+end on
+)NKSP_CODE",
+        .expectExitResultIsReal = true,
+        .expectExitResultUnitPrefix = { VM_NO_PREFIX },
+        .expectExitResultUnit = VM_NO_UNIT
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit(~NI_MATH_E)
+end on
+)NKSP_CODE",
+        .expectExitResultIsReal = true,
+        .expectExitResultUnitPrefix = { VM_NO_PREFIX },
+        .expectExitResultUnit = VM_NO_UNIT
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit($NI_CB_TYPE_INIT)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = VM_EVENT_HANDLER_INIT,
+        .expectExitResultUnitPrefix = { VM_NO_PREFIX },
+        .expectExitResultUnit = VM_NO_UNIT
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit($NI_CB_TYPE_NOTE)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = VM_EVENT_HANDLER_NOTE,
+        .expectExitResultUnitPrefix = { VM_NO_PREFIX },
+        .expectExitResultUnit = VM_NO_UNIT
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit($NI_CB_TYPE_RELEASE)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = VM_EVENT_HANDLER_RELEASE,
+        .expectExitResultUnitPrefix = { VM_NO_PREFIX },
+        .expectExitResultUnit = VM_NO_UNIT
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit($NI_CB_TYPE_CONTROLLER)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = VM_EVENT_HANDLER_CONTROLLER,
+        .expectExitResultUnitPrefix = { VM_NO_PREFIX },
+        .expectExitResultUnit = VM_NO_UNIT
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit($NI_CB_TYPE_RPN)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = VM_EVENT_HANDLER_RPN,
+        .expectExitResultUnitPrefix = { VM_NO_PREFIX },
+        .expectExitResultUnit = VM_NO_UNIT
+    });
+
+    runScript({
+        .code = R"NKSP_CODE(
+on init
+  exit($NI_CB_TYPE_NRPN)
+end on
+)NKSP_CODE",
+        .expectIntExitResult = VM_EVENT_HANDLER_NRPN,
+        .expectExitResultUnitPrefix = { VM_NO_PREFIX },
+        .expectExitResultUnit = VM_NO_UNIT
+    });
+
+    #if !SILENT_TEST
+    std::cout << std::endl;
+    #endif
+}
+
 #if !NO_MAIN
 
 int main() {
@@ -9642,6 +11966,11 @@ int main() {
     testBitwiseOrOperator();
     testBitwiseNotOperator();
     testPrecedenceOfOperators();
+    testIntVarDeclaration();
+    testIntArrayVarDeclaration();
+    testRealVarDeclaration();
+    testRealArrayVarDeclaration();
+    testStringVarDeclaration();
     testBuiltInMinFunction();
     testBuiltInMaxFunction();
     testBuiltInAbsFunction();
@@ -9651,6 +11980,8 @@ int main() {
     testBuiltInRandomFunction();
     testBuiltInShiftLeftFunction();
     testBuiltInShiftRightFunction();
+    testBuiltInMsbFunction();
+    testBuiltInLsbFunction();
     testBuiltInIntToRealFunction();
     testBuiltInRealFunction();
     testBuiltInRealToIntFunction();
@@ -9676,6 +12007,7 @@ int main() {
     testBuiltInSearchFunction();
     testIfStatement();
     testWhileStatement();
+    testBuiltInVars();
     std::cout << "\nAll tests passed successfully. :-)\n";
     return 0;
 }
