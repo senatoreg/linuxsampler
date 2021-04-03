@@ -3,7 +3,7 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003, 2004 by Benno Senoner and Christian Schoenebeck   *
- *   Copyright (C) 2005 - 2016 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2019 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -105,6 +105,44 @@ RTMathBase::usecs_t RTMathBase::unsafeMicroSeconds(clock_source_t source) {
     clock_gettime(cid, &t);
     return usecs_t( (double(t.tv_sec) * 1000000000.0 + double(t.tv_nsec)) / 1000.0 );
     #endif
+}
+
+bool RTMathBase::fEqual32(float a, float b) {
+    if (a == b) return true;
+
+    if (isinf(a) || isinf(b))
+        return isinf(a) == isinf(b);
+    if (isnan(a) || isnan(b))
+        return isnan(a) == isnan(b);
+
+    const int bits = 23 /* float32 type fraction bits */ - 4 /* arbitrarily reduced bit tolerance */;
+
+    if (a == 0.f)
+        return fabs(b) < (1.0 / pow(2, bits));
+    if (b == 0.f)
+        return fabs(a) < (1.0 / pow(2, bits));
+
+    const double epsilon = fabs(a / pow(2.0, bits));
+    return fabs(b - a) <= epsilon;
+}
+
+bool RTMathBase::fEqual64(double a, double b) {
+    if (a == b) return true;
+
+    if (isinf(a) || isinf(b))
+        return isinf(a) == isinf(b);
+    if (isnan(a) || isnan(b))
+        return isnan(a) == isnan(b);
+
+    const int bits = 52 /* float64 type fraction bits */ - 4 /* arbitrarily reduced bit tolerance */;
+
+    if (a == 0.f)
+        return fabs(b) < (1.0 / pow(2, bits));
+    if (b == 0.f)
+        return fabs(a) < (1.0 / pow(2, bits));
+
+    const double epsilon = fabs(a / pow(2.0, bits));
+    return fabs(b - a) <= epsilon;
 }
 
 /**

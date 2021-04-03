@@ -158,7 +158,7 @@ namespace LinuxSampler { namespace gig {
                 sample_t* pSrc = pFinalParam->pSrc;
                 float* pOutL   = pFinalParam->pOutLeft;
                 float* pOutR   = pFinalParam->pOutRight;
-#ifdef CONFIG_INTERPOLATE_VOLUME
+#if CONFIG_INTERPOLATE_VOLUME
                 float fDeltaL  = pFinalParam->fFinalVolumeDeltaLeft;
                 float fDeltaR  = pFinalParam->fFinalVolumeDeltaRight;
 #endif
@@ -173,7 +173,7 @@ namespace LinuxSampler { namespace gig {
                                 for (int i = 0; i < uiToGo; ++i) {
                                     samplePoint = Interpolate1StepMonoCPP(pSrc, &dPos, fPitch);
                                     samplePoint = filterL.Apply(samplePoint);
-#ifdef CONFIG_INTERPOLATE_VOLUME
+#if CONFIG_INTERPOLATE_VOLUME
                                     fVolumeL += fDeltaL;
                                     fVolumeR += fDeltaR;
 #endif
@@ -183,7 +183,7 @@ namespace LinuxSampler { namespace gig {
                             } else { // no filter needed
                                 for (int i = 0; i < uiToGo; ++i) {
                                     samplePoint = Interpolate1StepMonoCPP(pSrc, &dPos, fPitch);
-#ifdef CONFIG_INTERPOLATE_VOLUME
+#if CONFIG_INTERPOLATE_VOLUME
                                     fVolumeL += fDeltaL;
                                     fVolumeR += fDeltaR;
 #endif
@@ -199,7 +199,7 @@ namespace LinuxSampler { namespace gig {
                                 for (int i = 0; i < uiToGo; ++i) {
                                     samplePoint = getSample(pSrc, i + pos_offset);
                                     samplePoint = filterL.Apply(samplePoint);
-#ifdef CONFIG_INTERPOLATE_VOLUME
+#if CONFIG_INTERPOLATE_VOLUME
                                     fVolumeL += fDeltaL;
                                     fVolumeR += fDeltaR;
 #endif
@@ -209,7 +209,7 @@ namespace LinuxSampler { namespace gig {
                             } else { // no filter needed
                                 for (int i = 0; i < uiToGo; ++i) {
                                     samplePoint = getSample(pSrc, i + pos_offset);
-#ifdef CONFIG_INTERPOLATE_VOLUME
+#if CONFIG_INTERPOLATE_VOLUME
                                     fVolumeL += fDeltaL;
                                     fVolumeR += fDeltaR;
 #endif
@@ -233,7 +233,7 @@ namespace LinuxSampler { namespace gig {
                                     samplePoint = Interpolate1StepStereoCPP(pSrc, &dPos, fPitch);
                                     samplePoint.left  = filterL.Apply(samplePoint.left);
                                     samplePoint.right = filterR.Apply(samplePoint.right);
-#ifdef CONFIG_INTERPOLATE_VOLUME
+#if CONFIG_INTERPOLATE_VOLUME
                                     fVolumeL += fDeltaL;
                                     fVolumeR += fDeltaR;
 #endif
@@ -243,7 +243,7 @@ namespace LinuxSampler { namespace gig {
                             } else { // no filter needed
                                 for (int i = 0; i < uiToGo; ++i) {
                                     samplePoint = Interpolate1StepStereoCPP(pSrc, &dPos, fPitch);
-#ifdef CONFIG_INTERPOLATE_VOLUME
+#if CONFIG_INTERPOLATE_VOLUME
                                     fVolumeL += fDeltaL;
                                     fVolumeR += fDeltaR;
 #endif
@@ -262,7 +262,7 @@ namespace LinuxSampler { namespace gig {
                                     samplePoint.right = getSample(pSrc, ii + pos_offset + 1);
                                     samplePoint.left  = filterL.Apply(samplePoint.left);
                                     samplePoint.right = filterR.Apply(samplePoint.right);
-#ifdef CONFIG_INTERPOLATE_VOLUME
+#if CONFIG_INTERPOLATE_VOLUME
                                     fVolumeL += fDeltaL;
                                     fVolumeR += fDeltaR;
 #endif
@@ -273,7 +273,7 @@ namespace LinuxSampler { namespace gig {
                                 for (int i = 0, ii = 0; i < uiToGo; ++i, ii+=2) {
                                     samplePoint.left = getSample(pSrc, ii + pos_offset);
                                     samplePoint.right = getSample(pSrc, ii + pos_offset + 1);
-#ifdef CONFIG_INTERPOLATE_VOLUME
+#if CONFIG_INTERPOLATE_VOLUME
                                     fVolumeL += fDeltaL;
                                     fVolumeR += fDeltaR;
 #endif

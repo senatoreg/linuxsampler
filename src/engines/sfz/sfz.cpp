@@ -689,7 +689,7 @@ namespace sfz
         definition->xfout_hikey = xfout_hikey;
         definition->xf_keycurve = xf_keycurve;
         definition->xfin_lovel = xfin_lovel;
-        definition->xfin_hivel = xfin_lovel;
+        definition->xfin_hivel = xfin_hivel;
         definition->xfout_lovel = xfout_lovel;
         definition->xfout_hivel = xfout_hivel;
         definition->xf_velcurve = xf_velcurve;

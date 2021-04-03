@@ -3,7 +3,7 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003, 2004 by Benno Senoner and Christian Schoenebeck   *
- *   Copyright (C) 2005 - 2019 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2020 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -42,6 +42,9 @@
 #else
 #  define dmsg(debuglevel,x)
 #endif // CONFIG_DEBUG_LEVEL > 0
+
+#define _strfy(s) #s
+#define strfy(s) _strfy(s)
 
 #define EMMS __asm__ __volatile__ ("emms" ::: "st", "st(1)", "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)", "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "mm6", "mm7")
 
@@ -108,12 +111,16 @@ inline float ToFloat(const std::string& s) throw(LinuxSampler::Exception) {
 }
 
 inline std::string ltrim(std::string s) {
-    s.erase(s.begin(), std::find_if(s.begin(), s.end(), std::not1(std::ptr_fun<int, int>(std::isspace))));
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](int ch) {
+        return !std::isspace(ch);
+    }));
     return s;
 }
 
 inline std::string rtrim(std::string s) {
-    s.erase(std::find_if(s.rbegin(), s.rend(), std::not1(std::ptr_fun<int, int>(std::isspace))).base(), s.end());
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](int ch) {
+        return !std::isspace(ch);
+    }).base(), s.end());
     return s;
 }
 
@@ -143,5 +150,7 @@ extern bool g_fireMainThreadCallback;
 // sscanf() might be buggy regarding parsing of hex characters, so ...
 int hexToNumber(char hex_digit);
 int hexsToNumber(char hex_digit0, char hex_digit1 = '0');
+
+std::string backtraceAsString();
 
 #endif // __LS_GLOBAL_PRIVATE_H__

@@ -3,9 +3,9 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003,2004 by Benno Senoner and Christian Schoenebeck    *
- *   Copyright (C) 2005-2008 Christian Schoenebeck                         *
- *   Copyright (C) 2009-2012 Christian Schoenebeck and Grigor Iliev        *
- *   Copyright (C) 2013-2017 Christian Schoenebeck and Andreas Persson     *
+ *   Copyright (C) 2005-2020 Christian Schoenebeck                         *
+ *   Copyright (C) 2009-2012 Grigor Iliev                                  *
+ *   Copyright (C) 2013-2017 Andreas Persson                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -29,9 +29,9 @@ namespace LinuxSampler {
 
     AbstractVoice::AbstractVoice(SignalUnitRack* pRack): pSignalUnitRack(pRack) {
         pEngineChannel = NULL;
-        pLFO1 = new LFOUnsigned(1.0f);  // amplitude LFO (0..1 range)
-        pLFO2 = new LFOUnsigned(1.0f);  // filter LFO (0..1 range)
-        pLFO3 = new LFOSigned(1200.0f); // pitch LFO (-1200..+1200 range)
+        pLFO1 = new LFOClusterUnsigned(1.0f);  // amplitude LFO (0..1 range)
+        pLFO2 = new LFOClusterUnsigned(1.0f);  // filter LFO (0..1 range)
+        pLFO3 = new LFOClusterSigned(1200.0f); // pitch LFO (-1200..+1200 range)
         PlaybackState = playback_state_end;
         SynthesisMode = 0; // set all mode bits to 0 first
         // select synthesis implementation (asm core is not supported ATM)
@@ -118,7 +118,18 @@ namespace LinuxSampler {
         itKillEvent     = Pool<Event>::Iterator();
         MidiKeyBase* pKeyInfo = GetMidiKeyInfo(MIDIKey());
 
-        pGroupEvents = iKeyGroup ? pEngineChannel->ActiveKeyGroups[iKeyGroup] : 0;
+        // when editing key groups with an instrument editor while sound was
+        // already loaded, ActiveKeyGroups may not have the KeyGroup in question
+        // so use find() here instead of array subscript operator[] to avoid an
+        // implied creation of a NULL entry, to prevent a crash while editing
+        // instruments
+        {
+            AbstractEngineChannel::ActiveKeyGroupMap::const_iterator it =
+                pEngineChannel->ActiveKeyGroups.find(iKeyGroup);
+            pGroupEvents =
+                (iKeyGroup && it != pEngineChannel->ActiveKeyGroups.end()) ?
+                    it->second : NULL;
+        }
 
         SmplInfo   = GetSampleInfo();
         RgnInfo    = GetRegionInfo();
@@ -152,8 +163,9 @@ namespace LinuxSampler {
 
         VolumeSmoother.trigger(pEngineChannel->MidiVolume, subfragmentRate);
         NoteVolume.setCurveOnly(pNote ? pNote->Override.VolumeCurve : DEFAULT_FADE_CURVE);
-        NoteVolume.setCurrentValue(pNote ? pNote->Override.Volume : 1.f);
+        NoteVolume.setCurrentValue(pNote ? pNote->Override.Volume.Value : 1.f);
         NoteVolume.setDefaultDuration(pNote ? pNote->Override.VolumeTime : DEFAULT_NOTE_VOLUME_TIME_S);
+        NoteVolume.setFinal(pNote ? pNote->Override.Volume.Final : false);
 
         // Check if the sample needs disk streaming or is too short for that
         long cachedsamples = GetSampleCacheSize() / SmplInfo.FrameSize;
@@ -163,7 +175,8 @@ namespace LinuxSampler {
 
         if (DiskVoice) { // voice to be streamed from disk
             if (cachedsamples > (GetEngine()->MaxSamplesPerCycle << CONFIG_MAX_PITCH)) {
-                MaxRAMPos = cachedsamples - (GetEngine()->MaxSamplesPerCycle << CONFIG_MAX_PITCH) / SmplInfo.ChannelCount; //TODO: this calculation is too pessimistic and may better be moved to Render() method, so it calculates MaxRAMPos dependent to the current demand of sample points to be rendered (e.g. in case of JACK)
+                //TODO: this calculation is too pessimistic
+                MaxRAMPos = cachedsamples - (GetEngine()->MaxSamplesPerCycle << CONFIG_MAX_PITCH);
             } else {
                 // The cache is too small to fit a max sample buffer.
                 // Setting MaxRAMPos to 0 will probably cause a click
@@ -194,10 +207,13 @@ namespace LinuxSampler {
 
         Pitch = CalculatePitchInfo(PitchBend);
         NotePitch.setCurveOnly(pNote ? pNote->Override.PitchCurve : DEFAULT_FADE_CURVE);
-        NotePitch.setCurrentValue(pNote ? pNote->Override.Pitch : 1.0f);
+        NotePitch.setCurrentValue(pNote ? pNote->Override.Pitch.Value : 1.0f);
+        NotePitch.setFinal(pNote ? pNote->Override.Pitch.Final : false);
         NotePitch.setDefaultDuration(pNote ? pNote->Override.PitchTime : DEFAULT_NOTE_PITCH_TIME_S);
-        NoteCutoff = (pNote) ? pNote->Override.Cutoff : 1.0f;
-        NoteResonance = (pNote) ? pNote->Override.Resonance : 1.0f;
+        NoteCutoff.Value = (pNote) ? pNote->Override.Cutoff.Value : 1.0f;
+        NoteCutoff.Final = (pNote) ? pNote->Override.Cutoff.isFinal() : false;
+        NoteResonance.Value = (pNote) ? pNote->Override.Resonance.Value : 1.0f;
+        NoteResonance.Final = (pNote) ? pNote->Override.Resonance.Final : false;
 
         // the length of the decay and release curves are dependent on the velocity
         const double velrelease = 1 / GetVelocityRelease(MIDIVelocity());
@@ -210,9 +226,9 @@ namespace LinuxSampler {
             EGInfo egInfo = CalculateEG1ControllerInfluence(eg1controllervalue);
 
             if (pNote) {
-                egInfo.Attack  *= pNote->Override.Attack;
-                egInfo.Decay   *= pNote->Override.Decay;
-                egInfo.Release *= pNote->Override.Release;
+                pNote->Override.Attack.applyTo(egInfo.Attack);
+                pNote->Override.Decay.applyTo(egInfo.Decay);
+                pNote->Override.Release.applyTo(egInfo.Release);
             }
 
             TriggerEG1(egInfo, velrelease, velocityAttenuation, GetEngine()->SampleRate, MIDIVelocity());
@@ -222,9 +238,10 @@ namespace LinuxSampler {
 
         const uint8_t pan = (pSignalUnitRack) ? pSignalUnitRack->GetEndpointUnit()->CalculatePan(MIDIPan) : MIDIPan;
         for (int c = 0; c < 2; ++c) {
-            float value = (pNote) ? AbstractEngine::PanCurveValueNorm(pNote->Override.Pan, c) : 1.f;
+            float value = (pNote) ? AbstractEngine::PanCurveValueNorm(pNote->Override.Pan.Value, c) : 1.f;
             NotePan[c].setCurveOnly(pNote ? pNote->Override.PanCurve : DEFAULT_FADE_CURVE);
             NotePan[c].setCurrentValue(value);
+            NotePan[c].setFinal(pNote ? pNote->Override.Pan.Final : false);
             NotePan[c].setDefaultDuration(pNote ? pNote->Override.PanTime : DEFAULT_NOTE_PAN_TIME_S);
         }
 
@@ -237,9 +254,9 @@ namespace LinuxSampler {
             quickRampRate //NOTE: maybe we should have 2 separate pan smoothers, one for MIDI CC10 (with slow rate) and one for instrument script change_pan() calls (with fast rate)
         );
 
-#ifdef CONFIG_INTERPOLATE_VOLUME
+#if CONFIG_INTERPOLATE_VOLUME
         // setup initial volume in synthesis parameters
-    #ifdef CONFIG_PROCESS_MUTED_CHANNELS
+    #if CONFIG_PROCESS_MUTED_CHANNELS
         if (pEngineChannel->GetMute()) {
             finalSynthesisParameters.fFinalVolumeLeft  = 0;
             finalSynthesisParameters.fFinalVolumeRight = 0;
@@ -247,16 +264,23 @@ namespace LinuxSampler {
         else
     #else
         {
-            float finalVolume;
+            float finalVolume = pEngineChannel->MidiVolume * crossfadeVolume;
+            float fModVolume;
             if (pSignalUnitRack == NULL) {
-                finalVolume = pEngineChannel->MidiVolume * crossfadeVolume * pEG1->getLevel();
+                fModVolume = pEG1->getLevel();
             } else {
-                finalVolume = pEngineChannel->MidiVolume * crossfadeVolume * pSignalUnitRack->GetEndpointUnit()->GetVolume();
+                fModVolume = pSignalUnitRack->GetEndpointUnit()->GetVolume();
             }
-            finalVolume *= NoteVolume.currentValue();
+            NoteVolume.applyCurrentValueTo(fModVolume);
+            finalVolume *= fModVolume;
 
-            finalSynthesisParameters.fFinalVolumeLeft  = finalVolume * VolumeLeft  * PanLeftSmoother.render()  * NotePan[0].currentValue();
-            finalSynthesisParameters.fFinalVolumeRight = finalVolume * VolumeRight * PanRightSmoother.render() * NotePan[1].currentValue();
+            float panL = PanLeftSmoother.render();
+            float panR = PanRightSmoother.render();
+            NotePan[0].applyCurrentValueTo(panL);
+            NotePan[1].applyCurrentValueTo(panR);
+
+            finalSynthesisParameters.fFinalVolumeLeft  = finalVolume * VolumeLeft  * panL;
+            finalSynthesisParameters.fFinalVolumeRight = finalVolume * VolumeRight * panR;
         }
     #endif
 #endif
@@ -271,9 +295,9 @@ namespace LinuxSampler {
                 EGInfo egInfo = CalculateEG2ControllerInfluence(eg2controllervalue);
 
                 if (pNote) {
-                    egInfo.Attack  *= pNote->Override.CutoffAttack;
-                    egInfo.Decay   *= pNote->Override.CutoffDecay;
-                    egInfo.Release *= pNote->Override.CutoffRelease;
+                    pNote->Override.CutoffAttack.applyTo(egInfo.Attack);
+                    pNote->Override.CutoffDecay.applyTo(egInfo.Decay);
+                    pNote->Override.CutoffRelease.applyTo(egInfo.Release);
                 }
 
                 TriggerEG2(egInfo, velrelease, velocityAttenuation, GetEngine()->SampleRate, MIDIVelocity());
@@ -483,17 +507,20 @@ namespace LinuxSampler {
             PanLeftSmoother.update(AbstractEngine::PanCurve[128 - pan]);
             PanRightSmoother.update(AbstractEngine::PanCurve[pan]);
 
-            finalSynthesisParameters.fFinalPitch = Pitch.PitchBase * Pitch.PitchBend * NotePitch.render();
+            finalSynthesisParameters.fFinalPitch = Pitch.PitchBase * Pitch.PitchBend;
 
-            float fFinalVolume = VolumeSmoother.render() * CrossfadeSmoother.render() * NoteVolume.render();
-#ifdef CONFIG_PROCESS_MUTED_CHANNELS
+            float fFinalVolume = VolumeSmoother.render() * CrossfadeSmoother.render();
+#if CONFIG_PROCESS_MUTED_CHANNELS
             if (pChannel->GetMute()) fFinalVolume = 0;
 #endif
 
             // process transition events (note on, note off & sustain pedal)
             processTransitionEvents(itNoteEvent, iSubFragmentEnd);
             processGroupEvents(itGroupEvent, iSubFragmentEnd);
-            
+
+            float fModVolume = 1;
+            float fModPitch  = 1;
+
             if (pSignalUnitRack == NULL) {
                 // if the voice was killed in this subfragment, or if the
                 // filter EG is finished, switch EG1 to fade out stage
@@ -507,16 +534,16 @@ namespace LinuxSampler {
                 // process envelope generators
                 switch (pEG1->getSegmentType()) {
                     case EG::segment_lin:
-                        fFinalVolume *= pEG1->processLin();
+                        fModVolume *= pEG1->processLin();
                         break;
                     case EG::segment_exp:
-                        fFinalVolume *= pEG1->processExp();
+                        fModVolume *= pEG1->processExp();
                         break;
                     case EG::segment_end:
-                        fFinalVolume *= pEG1->getLevel();
+                        fModVolume *= pEG1->getLevel();
                         break; // noop
                     case EG::segment_pow:
-                        fFinalVolume *= pEG1->processPow();
+                        fModVolume *= pEG1->processPow();
                         break;
                 }
                 switch (pEG2->getSegmentType()) {
@@ -533,12 +560,12 @@ namespace LinuxSampler {
                         fFinalCutoff *= pEG2->processPow();
                         break;
                 }
-                if (EG3.active()) finalSynthesisParameters.fFinalPitch *= EG3.render();
+                if (EG3.active()) fModPitch *= EG3.render();
 
                 // process low frequency oscillators
-                if (bLFO1Enabled) fFinalVolume *= (1.0f - pLFO1->render());
+                if (bLFO1Enabled) fModVolume   *= (1.0f - pLFO1->render());
                 if (bLFO2Enabled) fFinalCutoff *= (1.0f - pLFO2->render());
-                if (bLFO3Enabled) finalSynthesisParameters.fFinalPitch *= RTMath::CentsToFreqRatio(pLFO3->render());
+                if (bLFO3Enabled) fModPitch *= RTMath::CentsToFreqRatio(pLFO3->render());
             } else {
                 // if the voice was killed in this subfragment, enter fade out stage
                 if (itKillEvent && killPos <= iSubFragmentEnd) {
@@ -558,13 +585,17 @@ namespace LinuxSampler {
                 fFinalCutoff    = pSignalUnitRack->GetEndpointUnit()->CalculateFilterCutoff(fFinalCutoff);
                 fFinalResonance = pSignalUnitRack->GetEndpointUnit()->CalculateResonance(fFinalResonance);
                 
-                finalSynthesisParameters.fFinalPitch =
-                    pSignalUnitRack->GetEndpointUnit()->CalculatePitch(finalSynthesisParameters.fFinalPitch);
-                    
+                fModPitch = pSignalUnitRack->GetEndpointUnit()->CalculatePitch(fModPitch);
             }
 
-            fFinalCutoff    *= NoteCutoff;
-            fFinalResonance *= NoteResonance;
+            NoteVolume.renderApplyTo(fModVolume);
+            NotePitch.renderApplyTo(fModPitch);
+            NoteCutoff.applyTo(fFinalCutoff);
+            NoteResonance.applyTo(fFinalResonance);
+
+            fFinalVolume *= fModVolume;
+
+            finalSynthesisParameters.fFinalPitch *= fModPitch;
 
             // limit the pitch so we don't read outside the buffer
             finalSynthesisParameters.fFinalPitch = RTMath::Min(finalSynthesisParameters.fFinalPitch, float(1 << CONFIG_MAX_PITCH));
@@ -584,18 +615,24 @@ namespace LinuxSampler {
 
             // prepare final synthesis parameters structure
             finalSynthesisParameters.uiToGo            = iSubFragmentEnd - i;
-#ifdef CONFIG_INTERPOLATE_VOLUME
+
+            float panL = PanLeftSmoother.render();
+            float panR = PanRightSmoother.render();
+            NotePan[0].renderApplyTo(panL);
+            NotePan[1].renderApplyTo(panR);
+
+#if CONFIG_INTERPOLATE_VOLUME
             finalSynthesisParameters.fFinalVolumeDeltaLeft  =
-                (fFinalVolume * VolumeLeft  * PanLeftSmoother.render() * NotePan[0].render() -
+                (fFinalVolume * VolumeLeft  * panL -
                  finalSynthesisParameters.fFinalVolumeLeft) / finalSynthesisParameters.uiToGo;
             finalSynthesisParameters.fFinalVolumeDeltaRight =
-                (fFinalVolume * VolumeRight * PanRightSmoother.render() * NotePan[1].render() -
+                (fFinalVolume * VolumeRight * panR -
                  finalSynthesisParameters.fFinalVolumeRight) / finalSynthesisParameters.uiToGo;
 #else
             finalSynthesisParameters.fFinalVolumeLeft  =
-                fFinalVolume * VolumeLeft  * PanLeftSmoother.render()  * NotePan[0].render();
+                fFinalVolume * VolumeLeft  * panL;
             finalSynthesisParameters.fFinalVolumeRight =
-                fFinalVolume * VolumeRight * PanRightSmoother.render() * NotePan[1].render();
+                fFinalVolume * VolumeRight * panR;
 #endif
             // render audio for one subfragment
             if (!delay) RunSynthesisFunction(SynthesisMode, &finalSynthesisParameters, &loop);
@@ -769,6 +806,7 @@ namespace LinuxSampler {
                 switch (itEvent->Param.NoteSynthParam.Type) {
                     case Event::synth_param_volume:
                         NoteVolume.fadeTo(itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+                        NoteVolume.setFinal(itEvent->Param.NoteSynthParam.isFinal());
                         break;
                     case Event::synth_param_volume_time:
                         NoteVolume.setDefaultDuration(itEvent->Param.NoteSynthParam.AbsValue);
@@ -778,6 +816,7 @@ namespace LinuxSampler {
                         break;
                     case Event::synth_param_pitch:
                         NotePitch.fadeTo(itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+                        NotePitch.setFinal(itEvent->Param.NoteSynthParam.isFinal());
                         break;
                     case Event::synth_param_pitch_time:
                         NotePitch.setDefaultDuration(itEvent->Param.NoteSynthParam.AbsValue);
@@ -794,6 +833,8 @@ namespace LinuxSampler {
                             AbstractEngine::PanCurveValueNorm(itEvent->Param.NoteSynthParam.AbsValue, 1 /*right*/),
                             GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE
                         );
+                        NotePan[0].setFinal(itEvent->Param.NoteSynthParam.isFinal());
+                        NotePan[1].setFinal(itEvent->Param.NoteSynthParam.isFinal());
                         break;
                     case Event::synth_param_pan_time:
                         NotePan[0].setDefaultDuration(itEvent->Param.NoteSynthParam.AbsValue);
@@ -804,25 +845,42 @@ namespace LinuxSampler {
                         NotePan[1].setCurve((fade_curve_t)itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
                         break;
                     case Event::synth_param_cutoff:
-                        NoteCutoff = itEvent->Param.NoteSynthParam.AbsValue;
+                        NoteCutoff.Value = itEvent->Param.NoteSynthParam.AbsValue;
+                        NoteCutoff.Final = itEvent->Param.NoteSynthParam.isFinal();
                         break;
                     case Event::synth_param_resonance:
-                        NoteResonance = itEvent->Param.NoteSynthParam.AbsValue;
+                        NoteResonance.Value = itEvent->Param.NoteSynthParam.AbsValue;
+                        NoteResonance.Final = itEvent->Param.NoteSynthParam.isFinal();
                         break;
                     case Event::synth_param_amp_lfo_depth:
-                        pLFO1->setScriptDepthFactor(itEvent->Param.NoteSynthParam.AbsValue);
+                        pLFO1->setScriptDepthFactor(
+                            itEvent->Param.NoteSynthParam.AbsValue,
+                            itEvent->Param.NoteSynthParam.isFinal()
+                        );
                         break;
                     case Event::synth_param_amp_lfo_freq:
-                        pLFO1->setScriptFrequencyFactor(itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+                        if (itEvent->Param.NoteSynthParam.isFinal())
+                            pLFO1->setScriptFrequencyFinal(itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+                        else
+                            pLFO1->setScriptFrequencyFactor(itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
                         break;
                     case Event::synth_param_cutoff_lfo_depth:
-                        pLFO2->setScriptDepthFactor(itEvent->Param.NoteSynthParam.AbsValue);
+                        pLFO2->setScriptDepthFactor(
+                            itEvent->Param.NoteSynthParam.AbsValue,
+                            itEvent->Param.NoteSynthParam.isFinal()
+                        );
                         break;
                     case Event::synth_param_cutoff_lfo_freq:
-                        pLFO2->setScriptFrequencyFactor(itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+                        if (itEvent->Param.NoteSynthParam.isFinal())
+                            pLFO2->setScriptFrequencyFinal(itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
+                        else
+                            pLFO2->setScriptFrequencyFactor(itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
                         break;
                     case Event::synth_param_pitch_lfo_depth:
-                        pLFO3->setScriptDepthFactor(itEvent->Param.NoteSynthParam.AbsValue);
+                        pLFO3->setScriptDepthFactor(
+                            itEvent->Param.NoteSynthParam.AbsValue,
+                            itEvent->Param.NoteSynthParam.isFinal()
+                        );
                         break;
                     case Event::synth_param_pitch_lfo_freq:
                         pLFO3->setScriptFrequencyFactor(itEvent->Param.NoteSynthParam.AbsValue, GetEngine()->SampleRate / CONFIG_DEFAULT_SUBFRAGMENT_SIZE);
@@ -832,6 +890,10 @@ namespace LinuxSampler {
                     case Event::synth_param_decay:
                     case Event::synth_param_sustain:
                     case Event::synth_param_release:
+                    case Event::synth_param_cutoff_attack:
+                    case Event::synth_param_cutoff_decay:
+                    case Event::synth_param_cutoff_sustain:
+                    case Event::synth_param_cutoff_release:
                         break; // noop
                 }
             }

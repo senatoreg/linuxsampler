@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 - 2017 Christian Schoenebeck
+ * Copyright (c) 2016 - 2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -21,11 +21,11 @@ namespace LinuxSampler {
     /**
      * Implements the built-in $ENGINE_UPTIME script variable.
      */
-    class InstrumentScriptVMDynVar_ENGINE_UPTIME : public VMDynIntVar {
+    class InstrumentScriptVMDynVar_ENGINE_UPTIME FINAL : public VMDynIntVar {
     public:
         InstrumentScriptVMDynVar_ENGINE_UPTIME(InstrumentScriptVM* parent) : m_vm(parent) {}
         bool isAssignable() const OVERRIDE { return false; }
-        int evalInt() OVERRIDE;
+        vmint evalInt() OVERRIDE;
     protected:
         InstrumentScriptVM* m_vm;
     };
@@ -33,11 +33,11 @@ namespace LinuxSampler {
     /**
      * Implements the built-in $NI_CALLBACK_ID script variable.
      */
-    class InstrumentScriptVMDynVar_NI_CALLBACK_ID : public VMDynIntVar {
+    class InstrumentScriptVMDynVar_NI_CALLBACK_ID FINAL : public VMDynIntVar {
     public:
         InstrumentScriptVMDynVar_NI_CALLBACK_ID(InstrumentScriptVM* parent) : m_vm(parent) {}
         bool isAssignable() const OVERRIDE { return false; }
-        int evalInt() OVERRIDE;
+        vmint evalInt() OVERRIDE;
     protected:
         InstrumentScriptVM* m_vm;
     };
@@ -45,14 +45,16 @@ namespace LinuxSampler {
     /**
      * Implements the built-in array %NKSP_CALLBACK_CHILD_ID[] script variable.
      */
-    class InstrumentScriptVMDynVar_NKSP_CALLBACK_CHILD_ID : public VMDynIntArrayVar {
+    class InstrumentScriptVMDynVar_NKSP_CALLBACK_CHILD_ID FINAL : public VMDynIntArrayVar {
     public:
         InstrumentScriptVMDynVar_NKSP_CALLBACK_CHILD_ID(InstrumentScriptVM* parent);
         VMIntArrayExpr* asIntArray() const OVERRIDE;
-        int arraySize() const OVERRIDE;
+        vmint arraySize() const OVERRIDE;
         bool isAssignable() const OVERRIDE { return false; }
-        int evalIntElement(uint i) OVERRIDE;
-        void assignIntElement(uint i, int value) OVERRIDE {}
+        vmint evalIntElement(vmuint i) OVERRIDE;
+        void assignIntElement(vmuint i, vmint value) OVERRIDE {}
+        vmfloat unitFactorOfElement(vmuint i) const OVERRIDE { return VM_NO_FACTOR; }
+        void assignElementUnitFactor(vmuint i, vmfloat factor) OVERRIDE {} // ignore assignment
     protected:
         InstrumentScriptVM* m_vm;
     };
@@ -60,21 +62,23 @@ namespace LinuxSampler {
     /**
      * Implements the built-in %ALL_EVENTS script array variable.
      */
-    class InstrumentScriptVMDynVar_ALL_EVENTS : public VMDynIntArrayVar {
+    class InstrumentScriptVMDynVar_ALL_EVENTS FINAL : public VMDynIntArrayVar {
     public:
         InstrumentScriptVMDynVar_ALL_EVENTS(InstrumentScriptVM* parent);
         virtual ~InstrumentScriptVMDynVar_ALL_EVENTS();
         VMIntArrayExpr* asIntArray() const OVERRIDE;
-        int arraySize() const OVERRIDE;
+        vmint arraySize() const OVERRIDE;
         bool isAssignable() const OVERRIDE { return false; }
-        int evalIntElement(uint i) OVERRIDE;
-        void assignIntElement(uint i, int value) OVERRIDE {}
+        vmint evalIntElement(vmuint i) OVERRIDE;
+        void assignIntElement(vmuint i, vmint value) OVERRIDE {}
+        vmfloat unitFactorOfElement(vmuint i) const OVERRIDE { return VM_NO_FACTOR; }
+        void assignElementUnitFactor(vmuint i, vmfloat factor) OVERRIDE {} // ignore assignment
     protected:
         void updateNoteIDs();
     private:
         InstrumentScriptVM* m_vm;
         note_id_t* m_ids;
-        uint m_numIDs;
+        vmuint m_numIDs;
     };
 
 } // namespace LinuxSampler

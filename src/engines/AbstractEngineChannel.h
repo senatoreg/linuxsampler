@@ -3,9 +3,9 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003,2004 by Benno Senoner and Christian Schoenebeck    *
- *   Copyright (C) 2005-2008 Christian Schoenebeck                         *
- *   Copyright (C) 2009-2012 Christian Schoenebeck and Grigor Iliev        *
- *   Copyright (C) 2012-2017 Christian Schoenebeck and Andreas Persson     *
+ *   Copyright (C) 2005-2020 Christian Schoenebeck                         *
+ *   Copyright (C) 2009-2012 Grigor Iliev                                  *
+ *   Copyright (C) 2012-2017 Andreas Persson                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -112,7 +112,7 @@ namespace LinuxSampler {
 
             void ScheduleResumeOfScriptCallback(RTList<ScriptEvent>::Iterator& itCallback, sched_time_t now, bool forever);
 
-            bool hasFreeScriptCallbacks(int n) const {
+            bool hasFreeScriptCallbacks(vmint n) const {
                 return pScript->pEvents->poolHasFreeElements(n);
             }
 
@@ -168,7 +168,7 @@ namespace LinuxSampler {
             std::vector<FxSend*>      fxSends;
             int                       GlobalTranspose;          ///< amount of semi tones all notes should be transposed
             int                       iLastPanRequest;          ///< just for the return value of Pan(), so we don't have to make an injective function
-            int                       iEngineIndexSelf;         ///< Reflects the index of this EngineChannel in the Engine's ArrayList.
+            ssize_t                   iEngineIndexSelf;         ///< Reflects the index of this EngineChannel in the Engine's ArrayList.
             bool                      bStatusChanged;           ///< true in case an engine parameter has changed (e.g. new instrument, another volumet)
             uint32_t                  RoundRobinIndex;          ///< counter for round robin sample selection, incremented for each note on
             InstrumentScript*         pScript;                  ///< Points to the real-time instrument script(s) to be executed, NULL if current instrument does not have an instrument script. Even though the underlying VM representation of the script is shared among multiple sampler channels, the InstrumentScript object here is not shared though, it exists for each sampler channel separately.
@@ -200,8 +200,8 @@ namespace LinuxSampler {
             virtual void RemoveAllFxSends();
 
             void ImportEvents(uint Samples);
-            virtual note_id_t ScheduleNoteMicroSec(const Event* pEvent, int delay) = 0;
-            event_id_t ScheduleEventMicroSec(const Event* pEvent, int delay);
+            virtual note_id_t ScheduleNoteMicroSec(const Event* pEvent, int64_t delay) = 0;
+            event_id_t ScheduleEventMicroSec(const Event* pEvent, int64_t delay);
             void IgnoreEvent(event_id_t id);
             virtual void IgnoreNote(note_id_t id) = 0;
             void IgnoreEventByScriptID(const ScriptID& id);

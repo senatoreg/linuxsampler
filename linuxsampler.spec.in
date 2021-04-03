@@ -1,7 +1,7 @@
 
 %define name    @PACKAGE@
 %define version @VERSION@
-%define release 15
+%define release 16
 %define prefix  @prefix@
 
 Summary:	LinuxSampler - modular, streaming capable, realtime audio sampler
@@ -12,9 +12,9 @@ Prefix:	%{prefix}
 License:	GPL
 Group:		Sound
 Source0:	%{name}-%{version}.tar.bz2
-URL:		http://www.linuxsampler.org/
+URL:		https://www.linuxsampler.org/
 BuildRoot:	/var/tmp/%{name}-%{version}-buildroot
-Requires:	libgig >= 4.1.0
+Requires:	libgig >= 4.2.0
 
 %description
 LinuxSampler is a free software audio sampler with professional grade
@@ -22,8 +22,8 @@ features. It offers disk streaming capability, real-time instrument
 scripts, and supports the following three sampler formats:
 
  - GigaStudio 4, previously known as Gigasampler (.gig)
- - SoundFont 2 (.sf2)
  - SFZ2 (.sfz)
+ - SoundFont 2 (.sf2)
 
 This package provides the backend of LinuxSampler, that is the
 sampler engine together with audio and MIDI drivers. LinuxSampler
@@ -31,7 +31,7 @@ can be controlled via network interface which uses an ASCII based
 protocol called LSCP. You might consider to install a GUI frontend
 for LinuxSampler as well.
 
-For more informations please visit http://www.linuxsampler.org
+For more information please visit https://www.linuxsampler.org
 
 %package devel
 Summary:        Linuxsampler development files
@@ -88,6 +88,8 @@ if [ -d $RPM_BUILD_ROOT ]; then rm -rf $RPM_BUILD_ROOT; fi
 %{prefix}/include/*
 
 %changelog
+* Sat Jul 27 2019 Christian Schoenebeck <cuse@users.sourceforge.net>
+- Going for linuxsampler 2.1.1 bugfix release.
 * Wed Nov 25 2017 Christian Schoenebeck <cuse@users.sourceforge.net>
 - Going for linuxsampler 2.1.0 release.
 * Wed Jul 15 2015 Christian Schoenebeck <cuse@users.sourceforge.net>

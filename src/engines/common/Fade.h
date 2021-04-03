@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Christian Schoenebeck
+ * Copyright (c) 2017 - 2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -31,6 +31,7 @@ class Fade : public EaseInEaseOut {
 public:
     Fade() : EaseInEaseOut() {
         curveType = DEFAULT_FADE_CURVE;
+        Final = false;
     }
 
     /**
@@ -90,8 +91,29 @@ public:
         return value;
     }
 
+    inline void setFinal(bool b) {
+        Final = b;
+    }
+
+    template<typename T>
+    inline void renderApplyTo(T& dst) {
+        if (Final)
+            dst = render();
+        else
+            dst *= render();
+    }
+
+    template<typename T>
+    inline void applyCurrentValueTo(T& dst) {
+        if (Final)
+            dst = currentValue();
+        else
+            dst *= currentValue();
+    }
+
 private:
     fade_curve_t curveType;
+    bool Final;
 };
 
 } // namespace LinuxSampler

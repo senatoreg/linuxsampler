@@ -66,18 +66,18 @@ namespace LinuxSampler { namespace sf2 {
             virtual void  Increment() OVERRIDE;
     };
 
-    class ModLfoUnit : public SFSignalUnit, public LFOSigned {
+    class ModLfoUnit : public SFSignalUnit, public LFOTriangleSigned {
         public:
-            ModLfoUnit(SF2SignalUnitRack* rack): SFSignalUnit(rack), LFOSigned(1200.0f) { }
+            ModLfoUnit(SF2SignalUnitRack* rack): SFSignalUnit(rack), LFOTriangleSigned(1200.0f) { }
             virtual bool  Active() OVERRIDE { return true; }
             virtual void  Trigger() OVERRIDE;
             virtual void  Increment() OVERRIDE;
             virtual float GetLevel() OVERRIDE { return Level; }
     };
 
-    class VibLfoUnit : public SFSignalUnit, public LFOSigned {
+    class VibLfoUnit : public SFSignalUnit, public LFOTriangleSigned {
         public:
-            VibLfoUnit(SF2SignalUnitRack* rack): SFSignalUnit(rack), LFOSigned(1200.0f) { }
+            VibLfoUnit(SF2SignalUnitRack* rack): SFSignalUnit(rack), LFOTriangleSigned(1200.0f) { }
             virtual bool  Active() OVERRIDE { return true; }
             virtual void  Trigger() OVERRIDE;
             virtual void  Increment() OVERRIDE;

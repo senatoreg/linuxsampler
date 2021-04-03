@@ -6,10 +6,10 @@
 // will be printed out as simple text on console.
 //
 // The test runner is not compiled by default (means by just running 'make'
-// or 'make all'), you have to compile it explicitly by running
-// 'make testcases' in the toplever directory or 'make linuxsamplertest' in
-// this source directory. Note: you need to have cppunit installed on your
-// system to be able to compile the unit tests.
+// or 'make all'), you have to compile it explicitly by running 'make tests'
+// in the toplever directory or 'make linuxsamplertest' in this source
+// directory. Note: you need to have cppunit installed on your system to be
+// able to compile the unit tests.
 //
 // This file usually doesn't have to be changed, especially not for adding
 // new tests !

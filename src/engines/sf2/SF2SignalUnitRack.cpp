@@ -46,8 +46,9 @@ namespace LinuxSampler { namespace sf2 {
 
         // GetEG1Sustain gets the decrease in level in centibels
         uint sustain = ::sf2::ToRatio(-1 * pVoice->pRegion->GetEG1Sustain(pVoice->pPresetRegion)) * 1000; // in permille
-        if (pVoice->pNote)
-            sustain *= pVoice->pNote->Override.Sustain;
+        if (pVoice->pNote) {
+            pVoice->pNote->Override.Sustain.applyTo(sustain);
+        }
 
         trigger (
             0, // should be in permille
@@ -150,7 +151,7 @@ namespace LinuxSampler { namespace sf2 {
             
         trigger (
             pVoice->pRegion->GetFreqModLfo(pVoice->pPresetRegion),
-            start_level_min,
+            LFO::start_level_min,
             1, 0, false, samplerate
         );
         updateByMIDICtrlValue(0);
@@ -176,7 +177,7 @@ namespace LinuxSampler { namespace sf2 {
             
         trigger (
             pVoice->pRegion->GetFreqVibLfo(pVoice->pPresetRegion),
-            start_level_min,
+            LFO::start_level_min,
             pVoice->pRegion->GetVibLfoToPitch(pVoice->pPresetRegion),
             0, false, samplerate
         );

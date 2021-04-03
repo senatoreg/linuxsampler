@@ -31,7 +31,7 @@ namespace LinuxSampler {
      * This is a triangle Low Frequency Oscillator which uses pure integer
      * math (without branches) to synthesize the triangular wave.
      */
-    template<range_type_t RANGE>
+    template<LFO::range_type_t RANGE>
     class LFOTriangleIntAbsMath : public LFOTriangleIntMath<RANGE> {
         public:
             /**
@@ -40,6 +40,7 @@ namespace LinuxSampler {
              * @param Max - maximum value of the output levels
              */
             LFOTriangleIntAbsMath(float Max) : LFOTriangleIntMath<RANGE>::LFOTriangleIntMath(Max) {
+                //NOTE: DO NOT add any custom initialization here, since it would break LFOCluster construction !
             }
 
             /**
@@ -49,7 +50,7 @@ namespace LinuxSampler {
              */
             inline float render() {
                 this->iLevel += this->c;
-                if (RANGE == range_unsigned)
+                if (RANGE == LFO::range_unsigned)
                     return this->normalizer * (float) (abs(this->iLevel));
                 else /* signed range */
                     return this->normalizer * (float) (abs(this->iLevel)) + this->offset;

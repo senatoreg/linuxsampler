@@ -1,6 +1,6 @@
 /***************************************************************************
  *                                                                         *
- *   Copyright (C) 2005 - 2017 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2019 Christian Schoenebeck                       *
  *                                                                         *
  *   This library is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -33,9 +33,19 @@ namespace LinuxSampler {
      * This is a triangle Low Frequency Oscillator implementation which uses
      * a di-harmonic solution. This means it sums up two harmonics
      * (sinusoids) to approximate a triangular wave.
+     *
+     * @deprecated This class will probably be removed in future. Reason: The
+     * resulting wave form is not similar enough to a triangular wave. to
+     * achieve a more appropriate triangular wave form, this class would need
+     * to use more harmonics, but that in turn would make runtime performance of
+     * this class even worse. And since it currently seems to perform worst
+     * already among all triangular wave implementations on all known
+     * architectures, doing that required harmonics change currently does not
+     * make sense. Furthermore the detailed behaviour of the other triangular
+     * LFO implementations had been fixed in the meantime; this one not.
      */
-    template<range_type_t RANGE>
-    class LFOTriangleDiHarmonic : public LFOBase<RANGE> {
+    template<LFO::range_type_t RANGE>
+    class DEPRECATED_API LFOTriangleDiHarmonic : public LFOBase<RANGE> {
         public:
 
             /**
@@ -44,6 +54,7 @@ namespace LinuxSampler {
              * @param Max - maximum value of the output levels
              */
             LFOTriangleDiHarmonic(float Max) : LFOBase<RANGE>::LFOBase(Max) {
+                //NOTE: DO NOT add any custom initialization here, since it would break LFOCluster construction !
             }
 
             /**
@@ -56,7 +67,7 @@ namespace LinuxSampler {
                 imag1 += c1 * real1;
                 real2 -= c2 * imag2;
                 imag2 += c2 * real2;
-                if (RANGE == range_unsigned)
+                if (RANGE == LFO::range_unsigned)
                     return (real1 + real2 * AMP2) * normalizer + offset;
                 else /* signed range */
                     return (real1 + real2 * AMP2) * normalizer;
@@ -71,7 +82,7 @@ namespace LinuxSampler {
                 this->ExtControlValue = ExtControlValue;
 
                 const float max = (this->InternalDepth + ExtControlValue * this->ExtControlDepthCoeff) * this->ScriptDepthFactor;
-                if (RANGE == range_unsigned) {
+                if (RANGE == LFO::range_unsigned) {
                     const float harmonicCompensation = 1.0f + fabsf(AMP2); // to compensate the compensation ;) (see trigger())
                     normalizer = max * 0.5f;
                     offset     = normalizer * harmonicCompensation;
@@ -94,12 +105,14 @@ namespace LinuxSampler {
              * @param SampleRate      - current sample rate of the engines
              *                          audio output signal
              */
-            void trigger(float Frequency, start_level_t StartLevel, uint16_t InternalDepth, uint16_t ExtControlDepth, bool FlipPhase, unsigned int SampleRate) {
+            void trigger(float Frequency, LFO::start_level_t StartLevel, uint16_t InternalDepth, uint16_t ExtControlDepth, bool FlipPhase, unsigned int SampleRate) {
                 this->Frequency = Frequency;
                 this->ScriptFrequencyFactor = this->ScriptDepthFactor = 1.f; // reset for new voice
                 const float harmonicCompensation = 1.0f + fabsf(AMP2); // to compensate the 2nd harmonic's amplitude overhead
                 this->InternalDepth        = (InternalDepth / 1200.0f) * this->Max / harmonicCompensation;
                 this->ExtControlDepthCoeff = (((float) ExtControlDepth / 1200.0f) / 127.0f) * this->Max / harmonicCompensation;
+                this->pFinalDepth = NULL;
+                this->pFinalFrequency = NULL;
 
                 const float freq = Frequency * this->ScriptFrequencyFactor;
                 c1 = 2.0f * M_PI * freq / (float) SampleRate;
@@ -107,14 +120,14 @@ namespace LinuxSampler {
 
                 double phi; // phase displacement
                 switch (StartLevel) {
-                    case start_level_mid:
+                    case LFO::start_level_mid:
                         //FIXME: direct jumping to 90° and 270° doesn't work out due to numeric accuracy problems (causes wave deformation)
                         //phi = (FlipPhase) ? 0.5 * M_PI : 1.5 * M_PI; // 90° or 270°
                         //break;
-                    case start_level_max:
+                    case LFO::start_level_max:
                         phi = (FlipPhase) ? M_PI : 0.0; // 180° or 0°
                         break;
-                    case start_level_min:
+                    case LFO::start_level_min:
                         phi = (FlipPhase) ? 0.0 : M_PI; // 0° or 180°
                         break;
                 }
@@ -145,13 +158,35 @@ namespace LinuxSampler {
                 c2 = 2.0f * M_PI * freq / (float) SampleRate * 3.0f;
             }
 
-            void setScriptDepthFactor(float factor) {
+            void setScriptDepthFactor(float factor, bool isFinal) {
                 this->ScriptDepthFactor = factor;
+                // set or reset this script depth parameter to be the sole
+                // source for the LFO depth
+                if (isFinal && !this->pFinalDepth)
+                    this->pFinalDepth = &this->ScriptDepthFactor;
+                else if (!isFinal && this->pFinalDepth == &this->ScriptDepthFactor)
+                    this->pFinalDepth = NULL;
+                // recalculate upon new depth
                 updateByMIDICtrlValue(this->ExtControlValue);
             }
 
             void setScriptFrequencyFactor(float factor, unsigned int SampleRate) {
                 this->ScriptFrequencyFactor = factor;
+                // in case script frequency was set as "final" value before,
+                // reset it so that all sources are processed from now on
+                if (this->pFinalFrequency == &this->ScriptFrequencyFactor)
+                    this->pFinalFrequency = NULL;
+                // recalculate upon new frequency
+                setFrequency(this->Frequency, SampleRate);
+            }
+
+            void setScriptFrequencyFinal(float hz, unsigned int SampleRate) {
+                this->ScriptFrequencyFactor = hz;
+                // assign script's given frequency as sole source for the LFO
+                // frequency, thus ignore all other sources
+                if (!this->pFinalFrequency)
+                    this->pFinalFrequency = &this->ScriptFrequencyFactor;
+                // recalculate upon new frequency
                 setFrequency(this->Frequency, SampleRate);
             }
 

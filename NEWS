@@ -1,3 +1,35 @@
+Version 2.1.1 (27 Jul 2019)
+
+  This is a maintenance release with various fixes. There are only two
+  minor new features in this release:
+
+  The Giga format engine adds a format extension which allows sound
+  designers to define whether release trigger samples shall be played when
+  the sustain pedal is released. In the previous release this was actually
+  the default behaviour by the sampler, but meanwhile there was a consensus
+  on the mailing list that release samples being triggered by sustain pedal
+  is not the common, expected behaviour. So this is no longer the default
+  behaviour, but you can still opt in to this old behaviour by using this
+  new format extension option (i.e. by using latest release version of
+  libgig and gigedit and enabling the respective checkbox for your
+  gig instrument). If you don't enable this option then release samples are
+  now only triggered by note-off events.
+
+  The sfz engine adds support for the commonly used built-in sample
+  '*silence' of the sfz format. It does what you think it does; it
+  instructs the sampler to play no sound at all. This is commonly used
+  in sfz files for instance for the lowest velocity switch to not play any
+  sample. With the previous release trying to load sfz files which used this
+  built-in sample caused a file loading error. There are various other
+  commonly used built-in samples in sfz files which you can denote by the
+  leading star character in the sample name, however the '*silence' one is
+  currently the only supported built-in sample by our sfz engine yet. Trying
+  to load sfz files which are using other built-in samples does not prevent
+  your instrument from being loaded by the sampler, however you will get a
+  warning message on the console that the built-in sample is not supported
+  yet and the sampler will simply play silence for that non supported
+  built-in sample.
+
 Version 2.1.0 (25 November 2017)
 
   This release adds a large amount of extensions and improvements for the

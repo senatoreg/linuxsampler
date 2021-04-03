@@ -1,4 +1,4 @@
-AM_CPPFLAGS = $(all_includes)
+AM_CPPFLAGS = $(all_includes) $(GIG_CFLAGS) $(SNDFILE_CFLAGS) $(LIB_SF2)
 METASOURCES = AUTO
 
 if HAVE_COREMIDI
@@ -10,6 +10,7 @@ endif
 EXTRA_PROGRAMS = linuxsamplertest
 linuxsamplertest_SOURCES = \
 	linuxsamplertest.cpp \
+	NKSPTest.cpp NKSPTest.h \
 	PoolTest.cpp PoolTest.h \
 	ThreadTest.cpp ThreadTest.h \
 	MutexTest.cpp MutexTest.h \

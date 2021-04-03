@@ -53,6 +53,7 @@ class ThreadTest : public CppUnit::TestFixture {
             public:
                 WaitingThread();
                 int Main();
+                using Thread::SignalStartThread; // make method public
             private:
                 LinuxSampler::Condition condition;
         };

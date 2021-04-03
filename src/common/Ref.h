@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Christian Schoenebeck
+ * Copyright (c) 2014 - 2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -10,8 +10,13 @@
 #ifndef LS_REF_H
 #define LS_REF_H
 
+#include "global.h"
+
 #include <set>
 #include <stdio.h>
+#if __cplusplus >= 201103L && !CONFIG_NO_CPP11STL
+# include <type_traits> // for std::enable_if and std::is_same
+#endif
 
 // You may enable this while developing or at least when you encounter any kind
 // of crashes or other misbehaviors in conjunction with Ref class guarded code.
@@ -20,25 +25,51 @@
 // be much slower.
 #define LS_REF_ASSERT_MODE 0
 
-#if LS_REF_ASSERT_MODE
-# warning LS_REF_ASSERT_MODE is enabled which will decrease runtime efficiency!
-#endif
-
-// Enable this for VERY verbose debug messages for debbugging deep issues with
+// Enable this for VERY verbose debug messages for debugging deep issues with
 // Ref class.
 #define LS_REF_VERBOSE_DEBUG_MSG 0
 
 #if LS_REF_ASSERT_MODE
+# warning LS_REF_ASSERT_MODE is enabled which will decrease runtime efficiency!
 # include <assert.h>
+#endif
+
+// Whether the Ref<> class shall be thread safe. Performance penalty should not
+// be measurable in practice due to non blocking, lock-free atomic add, sub and
+// CAS instructions being used, so this is recommended and enabled by default.
+#ifndef LS_REF_ATOMIC
+# define LS_REF_ATOMIC 1
+#endif
+
+//NOTE: We are using our own atomic implementation for atomic increment and
+// decrement instead of std::atomic of the C++ STL, because our atomic
+// implementation is lock-free and wait-free. The C++ standard just recommends,
+// but does not guarantee lock-free implementation (state of the C++20 standard
+// as of 2020-04-27):
+// https://en.cppreference.com/w/cpp/atomic/atomic/is_lock_free
+// For CAS though we simply use the STL version, since it is only used on
+// resource deallocation, which is not real-time safe anyway.
+#if LS_REF_ATOMIC
+# include "atomic.h"
+# include <atomic>
+#else
+# warning Ref<> class will not be thread safe (feature explicitly disabled)!
+#endif
+
+#if LS_REF_ASSERT_MODE && LS_REF_ATOMIC
+# include "Mutex.h"
 #endif
 
 namespace LinuxSampler {
 
-    //TODO: make reference count increment/decrement thread safe
-
     template<typename T, typename T_BASE> class Ref;
 
+    #if LS_REF_ASSERT_MODE
     extern std::set<void*> _allRefPtrs;
+    #endif
+    #if LS_REF_ASSERT_MODE && LS_REF_ATOMIC
+    extern Mutex _allRefPtrsMutex;
+    #endif
 
     /**
      * Exists just for implementation detail purpose, you cannot use it
@@ -52,56 +83,123 @@ namespace LinuxSampler {
         template<typename T_BASE1>
         class _RefCounter {
         public:
-            _RefCounter(T_BASE1* p, int refs) :
-                references(refs), ptr(p)
+            _RefCounter(T_BASE1* p, int refs, bool released) :
+                #if LS_REF_ATOMIC
+                references(ATOMIC_INIT(refs)),
+                #else
+                references(refs),
+                #endif
+                ptr(p)
             {
+                #if LS_REF_ATOMIC
+                std::atomic_store(&zombi, released);
+                #endif
                 #if LS_REF_VERBOSE_DEBUG_MSG
-                printf("Ref 0x%lx: new counter (refs=%d)\n", (long long)ptr, references);
+                printf("Ref %p: new counter (refs=%d)\n", ptr,
+                    #if LS_REF_ATOMIC
+                       atomic_read(&references)
+                    #else
+                       references
+                    #endif
+                );
                 #endif
                 #if LS_REF_ASSERT_MODE
                 assert(p);
                 assert(refs > 0);
-                assert(!_allRefPtrs.count(p));
-                _allRefPtrs.insert(p);
+                assert(!released);
+                {
+                    #if LS_REF_ATOMIC
+                    LockGuard lock(_allRefPtrsMutex);
+                    #endif
+                    assert(!_allRefPtrs.count(p));
+                    _allRefPtrs.insert(p);
+                }
                 #endif
             }
 
             virtual ~_RefCounter() {
                 #if LS_REF_VERBOSE_DEBUG_MSG
-                printf("Ref 0x%lx: counter destructor (refs=%d)\n", (long long)ptr, references);
+                printf("Ref %p: counter destructor (refs=%d)\n", ptr,
+                    #if LS_REF_ATOMIC
+                       atomic_read(&references)
+                    #else
+                       references
+                    #endif
+                );
                 #endif
                 fflush(stdout);
             }
 
             void retain() {
+                #if LS_REF_ATOMIC
+                atomic_inc(&references);
+                #else
                 references++;
+                #endif
                 #if LS_REF_VERBOSE_DEBUG_MSG
-                printf("Ref 0x%lx: retain (refs=%d)\n", (long long)ptr, references);
+                printf("Ref %p: retain (refs=%d)\n", ptr,
+                    #if LS_REF_ATOMIC
+                       atomic_read(&references)
+                    #else
+                       references
+                    #endif
+                );
                 #endif
             }
 
             void release() {
+                #if LS_REF_ATOMIC
+                bool zero = atomic_dec_and_test(&references);
+                # if LS_REF_VERBOSE_DEBUG_MSG
+                printf("Ref %p: release (zero=%d)\n", ptr, zero);
+                # endif
+                if (!zero) return;
+                bool expect = false;
+                bool release = std::atomic_compare_exchange_strong(&zombi, &expect, true);
+                if (release) deletePtr();
+                #else
                 if (!references) return;
                 references--;
-                #if LS_REF_VERBOSE_DEBUG_MSG
-                printf("Ref 0x%lx: release (refs=%d)\n", (long long)ptr, references);
-                #endif
+                # if LS_REF_VERBOSE_DEBUG_MSG
+                printf("Ref %p: release (refs=%d)\n", ptr, references);
+                # endif
                 if (!references) deletePtr();
+                #endif // LS_REF_ATOMIC
             }
         //protected:
             void deletePtr() {
                 #if LS_REF_VERBOSE_DEBUG_MSG
-                printf("RefCounter 0x%lx: deletePtr() (refs=%d)\n", (long long)ptr, references);
+                printf("RefCounter %p: deletePtr() (refs=%d)\n", ptr,
+                    #if LS_REF_ATOMIC
+                       atomic_read(&references)
+                    #else
+                       references
+                    #endif
+                );
                 #endif
                 #if LS_REF_ASSERT_MODE
+                # if LS_REF_ATOMIC
+                assert(!atomic_read(&references));
+                # else
                 assert(!references);
-                _allRefPtrs.erase(ptr);
+                # endif
+                {
+                    #if LS_REF_ATOMIC
+                    LockGuard lock(_allRefPtrsMutex);
+                    #endif
+                    _allRefPtrs.erase(ptr);
+                }
                 #endif
                 delete ptr;
                 delete this;
             }
 
+            #if LS_REF_ATOMIC
+            atomic_t references;
+            std::atomic<bool> zombi; ///< @c false if not released yet, @c true once @c ptr was released
+            #else
             int references;
+            #endif
             T_BASE1* ptr;
             //friend class ... todo
         };
@@ -135,9 +233,13 @@ namespace LinuxSampler {
     };
 
     /**
-     * Replicates a std::shared_ptr template class, to avoid a build requirement
-     * of having a C++11 compliant compiler (std::shared_ptr was not part of the
-     * C++03 standard).
+     * Replicates a std::shared_ptr template class. Originally this class was
+     * introduced to avoid a build requirement of having a C++11 compliant
+     * compiler (std::shared_ptr was not part of the C++03 standard). This class
+     * had been preserved though due to some advantages over the STL
+     * implementation, most notably: unlike std::shared_ptr from the STL, this
+     * Ref<> class provides thread safety by using a (guaranteed) lock-free and
+     * wait-free implementation, which is relevant for real-time applications.
      *
      * In contrast to the STL implementation though this implementation here
      * also supports copying references of derived, different types (in a type
@@ -196,30 +298,33 @@ namespace LinuxSampler {
     public:
         typedef RefBase<T_BASE> RefBaseT;
         typedef typename RefBase<T_BASE>::RefCounter RefCounter;
-        
+
         Ref() : RefBaseT() {
             #if LS_REF_VERBOSE_DEBUG_MSG
-            printf("Ref empty ctor Ref:0x%lx\n", (long long)this);
+            printf("Ref empty ctor Ref:%p\n", this);
             #endif
         }
 
+        #if __cplusplus >= 201103L && !CONFIG_NO_CPP11STL
+        template<std::enable_if<!std::is_same<T_BASE, T>::value>* = NULL> // prevent compiler error if T == T_Base (due to method signature duplicate)
+        #endif
         Ref(const T_BASE* p) : RefBaseT() {
             #if LS_REF_VERBOSE_DEBUG_MSG
-            printf("Ref base ptr ctor Ref:0x%lx <- p:0x%lx\n", (long long)this, (long long)p);
+            printf("Ref base ptr ctor Ref:%p <- p:%p\n", this, p);
             #endif
-            RefBaseT::refCounter = p ? new RefCounter((T_BASE*)p, 1) : NULL;
+            RefBaseT::refCounter = p ? new RefCounter((T_BASE*)p, 1, false) : NULL;
         }
 
         Ref(const T* p) : RefBaseT() {
             #if LS_REF_VERBOSE_DEBUG_MSG
-            printf("Ref main ptr ctor Ref:0x%lx <- p:0x%lx\n", (long long)this, (long long)p);
+            printf("Ref main ptr ctor Ref:%p <- p:%p\n", this, p);
             #endif
-            RefBaseT::refCounter = p ? new RefCounter((T*)p, 1) : NULL;
+            RefBaseT::refCounter = p ? new RefCounter((T*)p, 1, false) : NULL;
         }
 
         Ref(const RefBaseT& r) : RefBaseT() {
             #if LS_REF_VERBOSE_DEBUG_MSG
-            printf("Ref base ref ctor Ref:0x%lx <- Ref:0x%lx\n", (long long)this, (long long)&r);
+            printf("Ref base ref ctor Ref:%p <- Ref:%p\n", this, &r);
             #endif
             RefBaseT::refCounter = r.refCounter;
             if (RefBaseT::refCounter)
@@ -228,7 +333,7 @@ namespace LinuxSampler {
 
         Ref(const Ref& r) : RefBaseT() {
             #if LS_REF_VERBOSE_DEBUG_MSG
-            printf("Ref main ref ctor Ref:0x%lx <- Ref:0x%lx\n", (long long)this, (long long)&r);
+            printf("Ref main ref ctor Ref:%p <- Ref:%p\n", this, &r);
             #endif
             RefBaseT::refCounter = r.refCounter;
             if (RefBaseT::refCounter)
@@ -273,7 +378,7 @@ namespace LinuxSampler {
         inline operator RefBaseT&() {
             return *this;
         }
-        
+
         inline operator const RefBaseT&() const {
             return *this;
         }
@@ -292,11 +397,11 @@ namespace LinuxSampler {
 
         Ref<T,T_BASE>& operator=(const RefBaseT& other) {
             #if LS_REF_VERBOSE_DEBUG_MSG
-            printf("Ref base ref assignment Ref:0x%lx <- Ref:0x%lx\n", (long long)this, (long long)&other);
+            printf("Ref base ref assignment Ref:%p <- Ref:%p\n", this, &other);
             #endif
             if (isEquivalent(other)) {
                 #if LS_REF_VERBOSE_DEBUG_MSG
-                printf("Ref 0x%lx WRN: equivalent ref assignment ignored.\n", (long long)this);
+                printf("Ref %p WRN: equivalent ref assignment ignored.\n", this);
                 #endif
                 return *this;
             }
@@ -312,11 +417,11 @@ namespace LinuxSampler {
 
         Ref<T,T_BASE>& operator=(const Ref<T,T_BASE>& other) {
             #if LS_REF_VERBOSE_DEBUG_MSG
-            printf("Ref main ref assignment Ref:0x%lx <- Ref:0x%lx\n", (long long)this, (long long)&other);
+            printf("Ref main ref assignment Ref:%p <- Ref:%p\n", this, &other);
             #endif
             if (isEquivalent(other)) {
                 #if LS_REF_VERBOSE_DEBUG_MSG
-                printf("Ref 0x%lx WRN: equivalent ref assignment ignored.\n", (long long)this);
+                printf("Ref %p WRN: equivalent ref assignment ignored.\n", this);
                 #endif
                 return *this;
             }
@@ -332,11 +437,11 @@ namespace LinuxSampler {
 
         Ref<T,T_BASE>& operator=(const T* p) {
             #if LS_REF_VERBOSE_DEBUG_MSG
-            printf("Ref main ptr assignment Ref:0x%lx <- p:0x%lx\n", (long long)this, p);
+            printf("Ref main ptr assignment Ref:%p <- p:%p\n", this, p);
             #endif
             if (isEquivalent(p)) {
                 #if LS_REF_VERBOSE_DEBUG_MSG
-                printf("Ref 0x%lx WRN: equivalent ptr assignment ignored.\n", (long long)this);
+                printf("Ref %p WRN: equivalent ptr assignment ignored.\n", this);
                 #endif
                 return *this;
             }
@@ -344,20 +449,23 @@ namespace LinuxSampler {
                 RefBaseT::refCounter->release();
                 RefBaseT::refCounter = NULL;
             }
-            RefBaseT::refCounter = p ? new RefCounter((T*)p, 1) : NULL;
+            RefBaseT::refCounter = p ? new RefCounter((T*)p, 1, false) : NULL;
             #if LS_REF_VERBOSE_DEBUG_MSG
             printf("Ref main ptr assignment done\n");
             #endif
             return *this;
         }
 
+        #if __cplusplus >= 201103L && !CONFIG_NO_CPP11STL
+        template<std::enable_if<!std::is_same<T_BASE, T>::value>* = NULL> // prevent compiler error if T == T_Base (due to method signature duplicate)
+        #endif
         Ref<T,T_BASE>& operator=(const T_BASE* p) {
             #if LS_REF_VERBOSE_DEBUG_MSG
-            printf("Ref base ptr assignment Ref:0x%lx <- p:0x%lx\n", (long long)this, p);
+            printf("Ref base ptr assignment Ref:%p <- p:%p\n", this, p);
             #endif
             if (isEquivalent(p)) {
                 #if LS_REF_VERBOSE_DEBUG_MSG
-                printf("Ref 0x%lx WRN: equivalent ptr assignment ignored.\n", (long long)this);
+                printf("Ref %p WRN: equivalent ptr assignment ignored.\n", this);
                 #endif
                 return *this;
             }
@@ -365,7 +473,7 @@ namespace LinuxSampler {
                 RefBaseT::refCounter->release();
                 RefBaseT::refCounter = NULL;
             }
-            RefBaseT::refCounter = p ? new RefCounter((T*)p, 1) : NULL;
+            RefBaseT::refCounter = p ? new RefCounter((T*)p, 1, false) : NULL;
             return *this;
         }
     };

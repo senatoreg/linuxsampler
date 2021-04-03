@@ -3,9 +3,9 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003,2004 by Benno Senoner and Christian Schoenebeck    *
- *   Copyright (C) 2005-2008 Christian Schoenebeck                         *
- *   Copyright (C) 2009-2012 Christian Schoenebeck and Grigor Iliev        *
- *   Copyright (C) 2012-2017 Christian Schoenebeck and Andreas Persson     *
+ *   Copyright (C) 2005-2020 Christian Schoenebeck                         *
+ *   Copyright (C) 2009-2012 Grigor Iliev                                  *
+ *   Copyright (C) 2012-2017 Andreas Persson                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -276,7 +276,7 @@ namespace LinuxSampler {
 
     uint AbstractEngineChannel::GetMidiInputPortCount() {
         Sync< ArrayList<MidiInputPort*> > connections = midiInputs.back();
-        return connections->size();
+        return (uint) connections->size();
     }
 
     MidiInputPort* AbstractEngineChannel::GetMidiInputPort(uint index) {
@@ -890,8 +890,8 @@ namespace LinuxSampler {
      * @param delay - amount of microseconds in future (from now) when event shall be processed
      * @returns unique event ID of scheduled new event, or NULL on error
      */
-    event_id_t AbstractEngineChannel::ScheduleEventMicroSec(const Event* pEvent, int delay) {
-        dmsg(3,("AbstractEngineChannel::ScheduleEventMicroSec(Event.Type=%d,delay=%d)\n", pEvent->Type, delay));
+    event_id_t AbstractEngineChannel::ScheduleEventMicroSec(const Event* pEvent, int64_t delay) {
+        dmsg(3,("AbstractEngineChannel::ScheduleEventMicroSec(Event.Type=%d,delay=%" PRId64 ")\n", pEvent->Type, delay));
         RTList<Event>::Iterator itEvent = pEvents->allocAppend();
         if (!itEvent) {
             dmsg(1,("AbstractEngineChannel::ScheduleEventMicroSec(): Event pool emtpy!\n"));
@@ -1134,7 +1134,10 @@ namespace LinuxSampler {
      */
     void AbstractEngineChannel::HandleKeyGroupConflicts(uint KeyGroup, Pool<Event>::Iterator& itNoteOnEvent) {
         dmsg(4,("HandelKeyGroupConflicts KeyGroup=%d\n", KeyGroup));
-        if (KeyGroup) {
+        // when editing key groups with an instrument editor while sound was
+        // already loaded, ActiveKeyGroups may not have the KeyGroup in question
+        // so check for that to prevent a crash while editing instruments
+        if (KeyGroup && ActiveKeyGroups.count(KeyGroup)) {
             // send a release event to all active voices in the group
             RTList<Event>::Iterator itEvent = ActiveKeyGroups[KeyGroup]->allocAppend(pEngine->pEventPool);
             *itEvent = *itNoteOnEvent;

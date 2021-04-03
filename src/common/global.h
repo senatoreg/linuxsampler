@@ -3,7 +3,7 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003, 2004 by Benno Senoner and Christian Schoenebeck   *
- *   Copyright (C) 2005 - 2013 Christian Schoenebeck                       *
+ *   Copyright (C) 2005 - 2020 Christian Schoenebeck                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -27,11 +27,19 @@
 #ifndef __LS_GLOBAL_H__
 #define __LS_GLOBAL_H__
 
+// workaround for a bug with older versions of mingw, which would prevent
+// portable format specifiers like PRId64 from being defined
+#ifdef __MINGW32__
+# define __STDC_FORMAT_MACROS 1
+#endif
+
+// C++ header <string> before any C headers intentionally here, due to
+// format specifiers bug occurring with older versions of mingw (see above)
+#include <string>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
-
-#include <string>
+#include <inttypes.h>
 
 typedef std::string String;
 
@@ -71,8 +79,10 @@ typedef unsigned int uint;
 // C++ "override" keyword introduced with C++11 standard
 #if IS_CPP11
 # define OVERRIDE override
+# define FINAL final
 #else
 # define OVERRIDE
+# define FINAL
 #endif
 
 #endif // __LS_GLOBAL_H__

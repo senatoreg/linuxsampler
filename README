@@ -2,7 +2,7 @@ LinuxSampler - modular, streaming capable sampler
 
 Copyright (C) 2003, 2004 by Benno Senoner (benno@gardena.net)
               and Christian Schoenebeck (cuse@users.sourceforge.net)
-Copyright (C) 2005 - 2017 Christian Schoenebeck
+Copyright (C) 2005 - 2020 Christian Schoenebeck
 
 
 License
@@ -99,3 +99,18 @@ Compilation on OSX
 
     Please read osx/README.osx for detailed instructions about how to
     compile the sampler for Mac OSX.
+
+Test Cases
+----------
+
+    There are automated test cases against core elements of the sampler,
+    which allow you to check the beheaviour of the sampler on your system.
+    These test cases are not compiled by default:
+
+    o Make sure cppunit is installed on your system.
+
+    o Run 'make tests' from the toplevel source directory to compile the
+      test cases.
+
+    o Run the test cases with 'src/testcases/linuxsamplertest'.
+

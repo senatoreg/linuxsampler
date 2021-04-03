@@ -129,6 +129,8 @@ namespace LinuxSampler { namespace gig {
                 else if (ValueToCheck < Min) ValueToCheck = Min;
                 return ValueToCheck;
             }
+
+            uint8_t MinCutoff() const;
     };
 
 }} // namespace LinuxSampler::gig

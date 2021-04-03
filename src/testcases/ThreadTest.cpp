@@ -19,10 +19,9 @@ int ThreadTest::DummyThread::Main() {
     wasRunning = true;
     while (true) {
 		someVariable = -1;
-#if CONFIG_PTHREAD_TESTCANCEL
 		TestCancel();
-#endif
 	}
+	return 0;
 }
 
 
@@ -37,6 +36,7 @@ int ThreadTest::HelperThread::Main() {
     pDummyThread->StopThread();
     pDummyThread->someVariable = 0; // we set this to another value than -1 so we can check if the DummyThread was still running
     returnedFromDummyStop = true;
+    return 0;
 }
 
 bool ThreadTest::HelperThread::dummyThreadWasNotRunningAnymoreAfter_StopThread_call() {

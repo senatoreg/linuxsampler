@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017 Christian Schoenebeck
+ * Copyright (c) 2014-2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -10,9 +10,10 @@
 #include "InstrumentScriptVMFunctions.h"
 #include "InstrumentScriptVM.h"
 #include "../AbstractEngineChannel.h"
+#include "../../common/global_private.h"
 
 namespace LinuxSampler {
-    
+
     // play_note() function
 
     InstrumentScriptVMFunction_play_note::InstrumentScriptVMFunction_play_note(InstrumentScriptVM* parent)
@@ -20,10 +21,82 @@ namespace LinuxSampler {
     {
     }
 
+    bool InstrumentScriptVMFunction_play_note::acceptsArgType(vmint iArg, ExprType_t type) const {
+        if (iArg == 2 || iArg == 3)
+            return type == INT_EXPR || type == REAL_EXPR;
+        else
+            return type == INT_EXPR;
+    }
+
+    bool InstrumentScriptVMFunction_play_note::acceptsArgUnitType(vmint iArg, StdUnit_t type) const {
+        if (iArg == 2 || iArg == 3)
+            return type == VM_NO_UNIT || type == VM_SECOND;
+        else
+            return type == VM_NO_UNIT;
+    }
+
+    bool InstrumentScriptVMFunction_play_note::acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const {
+        if (iArg == 2 || iArg == 3)
+            return type == VM_SECOND; // only allow metric prefix(es) if 'seconds' is used as unit type
+        else
+            return false;
+    }
+
+    void InstrumentScriptVMFunction_play_note::checkArgs(VMFnArgs* args,
+                                                         std::function<void(String)> err,
+                                                         std::function<void(String)> wrn)
+    {
+        // super class checks
+        Super::checkArgs(args, err, wrn);
+
+        // own checks ...
+        if (args->arg(0)->isConstExpr()) {
+            vmint note = args->arg(0)->asNumber()->evalCastInt();
+            if (note < 0 || note > 127) {
+                err("MIDI note number value for argument 1 must be between 0..127");
+                return;
+            }
+        }
+        if (args->argsCount() >= 2 && args->arg(1)->isConstExpr()) {
+            vmint velocity = args->arg(1)->asNumber()->evalCastInt();
+            if (velocity < 0 || velocity > 127) {
+                err("MIDI velocity value for argument 2 must be between 0..127");
+                return;
+            }
+        }
+        if (args->argsCount() >= 3 && args->arg(2)->isConstExpr()) {
+            VMNumberExpr* argSampleOffset = args->arg(2)->asNumber();
+            vmint sampleoffset =
+                (argSampleOffset->unitType()) ?
+                    argSampleOffset->evalCastInt(VM_MICRO) :
+                    argSampleOffset->evalCastInt();
+            if (sampleoffset < -1) {
+                err("Sample offset of argument 3 may not be less than -1");
+                return;
+            }
+        }
+        if (args->argsCount() >= 4 && args->arg(3)->isConstExpr()) {
+            VMNumberExpr* argDuration = args->arg(3)->asNumber();
+            vmint duration =
+                (argDuration->unitType()) ?
+                    argDuration->evalCastInt(VM_MICRO) :
+                    argDuration->evalCastInt();
+            if (duration < -2) {
+                err("Argument 4 must be a duration value of at least -2 or higher");
+                return;
+            }
+        }
+    }
+
     VMFnResult* InstrumentScriptVMFunction_play_note::exec(VMFnArgs* args) {
-        int note = args->arg(0)->asInt()->evalInt();
-        int velocity = (args->argsCount() >= 2) ? args->arg(1)->asInt()->evalInt() : 127;
-        int duration = (args->argsCount() >= 4) ? args->arg(3)->asInt()->evalInt() : 0; //TODO: -1 might be a better default value instead of 0
+        vmint note = args->arg(0)->asInt()->evalInt();
+        vmint velocity = (args->argsCount() >= 2) ? args->arg(1)->asInt()->evalInt() : 127;
+        VMNumberExpr* argDuration = (args->argsCount() >= 4) ? args->arg(3)->asNumber() : NULL;
+        vmint duration =
+            (argDuration) ?
+                (argDuration->unitType()) ?
+                    argDuration->evalCastInt(VM_MICRO) :
+                    argDuration->evalCastInt() : 0; //TODO: -1 might be a better default value instead of 0
 
         if (note < 0 || note > 127) {
             errMsg("play_note(): argument 1 is an invalid note number");
@@ -68,11 +141,16 @@ namespace LinuxSampler {
         // if a sample offset is supplied, assign the offset as override
         // to the previously created Note object
         if (args->argsCount() >= 3) {
-            int sampleoffset = args->arg(2)->asInt()->evalInt();
+            VMNumberExpr* argSampleOffset = args->arg(2)->asNumber();
+            vmint sampleoffset =
+                (argSampleOffset->unitType()) ?
+                    argSampleOffset->evalCastInt(VM_MICRO) :
+                    argSampleOffset->evalCastInt();
             if (sampleoffset >= 0) {
                 NoteBase* pNote = pEngineChannel->pEngine->NoteByID(id);
                 if (pNote) {
-                    pNote->Override.SampleOffset = sampleoffset;
+                    pNote->Override.SampleOffset =
+                        (decltype(pNote->Override.SampleOffset)) sampleoffset;
                 }
             } else if (sampleoffset < -1) {
                 errMsg("play_note(): sample offset of argument 3 may not be less than -1");
@@ -102,8 +180,8 @@ namespace LinuxSampler {
     }
 
     VMFnResult* InstrumentScriptVMFunction_set_controller::exec(VMFnArgs* args) {
-        int controller = args->arg(0)->asInt()->evalInt();
-        int value      = args->arg(1)->asInt()->evalInt();
+        vmint controller = args->arg(0)->asInt()->evalInt();
+        vmint value      = args->arg(1)->asInt()->evalInt();
 
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
@@ -133,6 +211,80 @@ namespace LinuxSampler {
         return successResult( ScriptID::fromEventID(id) );
     }
 
+    // set_rpn() function
+
+    InstrumentScriptVMFunction_set_rpn::InstrumentScriptVMFunction_set_rpn(InstrumentScriptVM* parent)
+        : m_vm(parent)
+    {
+    }
+
+    VMFnResult* InstrumentScriptVMFunction_set_rpn::exec(VMFnArgs* args) {
+        vmint parameter = args->arg(0)->asInt()->evalInt();
+        vmint value     = args->arg(1)->asInt()->evalInt();
+
+        if (parameter < 0 || parameter > 16383) {
+            errMsg("set_rpn(): argument 1 exceeds RPN parameter number range");
+            return errorResult();
+        }
+        if (value < 0 || value > 16383) {
+            errMsg("set_rpn(): argument 2 exceeds RPN value range");
+            return errorResult();
+        }
+
+        AbstractEngineChannel* pEngineChannel =
+            static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
+
+        Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
+        e.Init(); // clear IDs
+        e.Type = Event::type_rpn;
+        e.Param.RPN.Parameter = parameter;
+        e.Param.RPN.Value = value;
+
+        const event_id_t id = pEngineChannel->ScheduleEventMicroSec(&e, 0);
+
+        // even if id is null, don't return an errorResult() here, because that
+        // would abort the script, and under heavy load it may be considerable
+        // that ScheduleEventMicroSec() fails above, so simply ignore that
+        return successResult( ScriptID::fromEventID(id) );
+    }
+
+    // set_nrpn() function
+
+    InstrumentScriptVMFunction_set_nrpn::InstrumentScriptVMFunction_set_nrpn(InstrumentScriptVM* parent)
+        : m_vm(parent)
+    {
+    }
+
+    VMFnResult* InstrumentScriptVMFunction_set_nrpn::exec(VMFnArgs* args) {
+        vmint parameter = args->arg(0)->asInt()->evalInt();
+        vmint value     = args->arg(1)->asInt()->evalInt();
+
+        if (parameter < 0 || parameter > 16383) {
+            errMsg("set_nrpn(): argument 1 exceeds NRPN parameter number range");
+            return errorResult();
+        }
+        if (value < 0 || value > 16383) {
+            errMsg("set_nrpn(): argument 2 exceeds NRPN value range");
+            return errorResult();
+        }
+
+        AbstractEngineChannel* pEngineChannel =
+            static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
+
+        Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
+        e.Init(); // clear IDs
+        e.Type = Event::type_nrpn;
+        e.Param.NRPN.Parameter = parameter;
+        e.Param.NRPN.Value = value;
+
+        const event_id_t id = pEngineChannel->ScheduleEventMicroSec(&e, 0);
+
+        // even if id is null, don't return an errorResult() here, because that
+        // would abort the script, and under heavy load it may be considerable
+        // that ScheduleEventMicroSec() fails above, so simply ignore that
+        return successResult( ScriptID::fromEventID(id) );
+    }
+
     // ignore_event() function
 
     InstrumentScriptVMFunction_ignore_event::InstrumentScriptVMFunction_ignore_event(InstrumentScriptVM* parent)
@@ -140,7 +292,7 @@ namespace LinuxSampler {
     {
     }
 
-    bool InstrumentScriptVMFunction_ignore_event::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_ignore_event::acceptsArgType(vmint iArg, ExprType_t type) const {
         return type == INT_EXPR || type == INT_ARR_EXPR;
     }
 
@@ -196,15 +348,32 @@ namespace LinuxSampler {
     {
     }
 
-    bool InstrumentScriptVMFunction_note_off::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_note_off::acceptsArgType(vmint iArg, ExprType_t type) const {
         return type == INT_EXPR || type == INT_ARR_EXPR;
+    }
+
+    void InstrumentScriptVMFunction_note_off::checkArgs(VMFnArgs* args,
+                                                        std::function<void(String)> err,
+                                                        std::function<void(String)> wrn)
+    {
+        // super class checks
+        Super::checkArgs(args, err, wrn);
+
+        // own checks ...
+        if (args->argsCount() >= 2 && args->arg(1)->isConstExpr() && args->arg(1)->exprType() == INT_EXPR) {
+            vmint velocity = args->arg(1)->asInt()->evalInt();
+            if (velocity < 0 || velocity > 127) {
+                err("MIDI velocity value for argument 2 must be between 0..127");
+                return;
+            }
+        }
     }
 
     VMFnResult* InstrumentScriptVMFunction_note_off::exec(VMFnArgs* args) {
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
 
-        int velocity = (args->argsCount() >= 2) ? args->arg(1)->asInt()->evalInt() : 127;
+        vmint velocity = (args->argsCount() >= 2) ? args->arg(1)->asInt()->evalInt() : 127;
         if (velocity < 0 || velocity > 127) {
             errMsg("note_off(): argument 2 is an invalid velocity value");
             return errorResult();
@@ -235,7 +404,7 @@ namespace LinuxSampler {
             pEngineChannel->ScheduleEventMicroSec(&e, 0);
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -264,9 +433,26 @@ namespace LinuxSampler {
     {
     }
 
+    void InstrumentScriptVMFunction_set_event_mark::checkArgs(VMFnArgs* args,
+                                                              std::function<void(String)> err,
+                                                              std::function<void(String)> wrn)
+    {
+        // super class checks
+        Super::checkArgs(args, err, wrn);
+
+        // own checks ...
+        if (args->argsCount() >= 2 && args->arg(1)->isConstExpr()) {
+            const vmint groupID = args->arg(1)->asInt()->evalInt();
+            if (groupID < 0 || groupID >= INSTR_SCRIPT_EVENT_GROUPS) {
+                err("Argument 2 value is an invalid group id.");
+                return;
+            }
+        }
+    }
+
     VMFnResult* InstrumentScriptVMFunction_set_event_mark::exec(VMFnArgs* args) {
         const ScriptID id = args->arg(0)->asInt()->evalInt();
-        const int groupID = args->arg(1)->asInt()->evalInt();
+        const vmint groupID = args->arg(1)->asInt()->evalInt();
 
         if (groupID < 0 || groupID >= INSTR_SCRIPT_EVENT_GROUPS) {
             errMsg("set_event_mark(): argument 2 is an invalid group id");
@@ -302,9 +488,26 @@ namespace LinuxSampler {
     {
     }
 
+    void InstrumentScriptVMFunction_delete_event_mark::checkArgs(VMFnArgs* args,
+                                                                 std::function<void(String)> err,
+                                                                 std::function<void(String)> wrn)
+    {
+        // super class checks
+        Super::checkArgs(args, err, wrn);
+
+        // own checks ...
+        if (args->argsCount() >= 2 && args->arg(1)->isConstExpr()) {
+            const vmint groupID = args->arg(1)->asInt()->evalInt();
+            if (groupID < 0 || groupID >= INSTR_SCRIPT_EVENT_GROUPS) {
+                err("Argument 2 value is an invalid group id.");
+                return;
+            }
+        }
+    }
+
     VMFnResult* InstrumentScriptVMFunction_delete_event_mark::exec(VMFnArgs* args) {
         const ScriptID id = args->arg(0)->asInt()->evalInt();
-        const int groupID = args->arg(1)->asInt()->evalInt();
+        const vmint groupID = args->arg(1)->asInt()->evalInt();
 
         if (groupID < 0 || groupID >= INSTR_SCRIPT_EVENT_GROUPS) {
             errMsg("delete_event_mark(): argument 2 is an invalid group id");
@@ -322,32 +525,61 @@ namespace LinuxSampler {
     // by_marks() function
 
     InstrumentScriptVMFunction_by_marks::InstrumentScriptVMFunction_by_marks(InstrumentScriptVM* parent)
-        : m_vm(parent)
+        : m_vm(parent), m_result(NULL)
     {
     }
 
-    int InstrumentScriptVMFunction_by_marks::Result::arraySize() const {
+    vmint InstrumentScriptVMFunction_by_marks::Result::arraySize() const {
         return eventGroup->size();
     }
 
-    int InstrumentScriptVMFunction_by_marks::Result::evalIntElement(uint i) {
+    vmint InstrumentScriptVMFunction_by_marks::Result::evalIntElement(vmuint i) {
         return (*eventGroup)[i];
     }
 
     VMFnResult* InstrumentScriptVMFunction_by_marks::errorResult() {
-        m_result.eventGroup = NULL;
-        m_result.flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
-        return &m_result;
+        m_result->eventGroup = NULL;
+        m_result->flags = StmtFlags_t(STMT_ABORT_SIGNALLED | STMT_ERROR_OCCURRED);
+        return m_result;
     }
 
     VMFnResult* InstrumentScriptVMFunction_by_marks::successResult(EventGroup* eventGroup) {
-        m_result.eventGroup = eventGroup;
-        m_result.flags = STMT_SUCCESS;
-        return &m_result;
+        m_result->eventGroup = eventGroup;
+        m_result->flags = STMT_SUCCESS;
+        return m_result;
+    }
+
+    void InstrumentScriptVMFunction_by_marks::checkArgs(VMFnArgs* args,
+                                                        std::function<void(String)> err,
+                                                        std::function<void(String)> wrn)
+    {
+        // super class checks
+        Super::checkArgs(args, err, wrn);
+
+        // own checks ...
+        if (args->arg(0)->isConstExpr()) {
+            const vmint groupID = args->arg(0)->asInt()->evalInt();
+            if (groupID < 0 || groupID >= INSTR_SCRIPT_EVENT_GROUPS) {
+                err("Argument value is an invalid group id.");
+                return;
+            }
+        }
+    }
+
+    VMFnResult* InstrumentScriptVMFunction_by_marks::allocResult(VMFnArgs* args) {
+        return new Result;
+    }
+
+    void InstrumentScriptVMFunction_by_marks::bindResult(VMFnResult* res) {
+        m_result = dynamic_cast<Result*>(res);
+    }
+
+    VMFnResult* InstrumentScriptVMFunction_by_marks::boundResult() const {
+        return m_result;
     }
 
     VMFnResult* InstrumentScriptVMFunction_by_marks::exec(VMFnArgs* args) {
-        int groupID = args->arg(0)->asInt()->evalInt();
+        vmint groupID = args->arg(0)->asInt()->evalInt();
 
         if (groupID < 0 || groupID >= INSTR_SCRIPT_EVENT_GROUPS) {
             errMsg("by_marks(): argument is an invalid group id");
@@ -367,15 +599,37 @@ namespace LinuxSampler {
     {
     }
 
-    bool InstrumentScriptVMFunction_change_vol::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_change_vol::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
+        else if (iArg == 1)
+            return type == INT_EXPR || type == REAL_EXPR;
         else
             return type == INT_EXPR;
     }
 
+    bool InstrumentScriptVMFunction_change_vol::acceptsArgUnitType(vmint iArg, StdUnit_t type) const {
+        if (iArg == 1)
+            return type == VM_NO_UNIT || type == VM_BEL;
+        else
+            return type == VM_NO_UNIT;
+    }
+
+    bool InstrumentScriptVMFunction_change_vol::acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const {
+        return iArg == 1 && type == VM_BEL; // only allow metric prefix(es) if 'Bel' is used as unit type
+    }
+
+    bool InstrumentScriptVMFunction_change_vol::acceptsArgFinal(vmint iArg) const {
+        return iArg == 1;
+    }
+
     VMFnResult* InstrumentScriptVMFunction_change_vol::exec(VMFnArgs* args) {
-        int volume = args->arg(1)->asInt()->evalInt(); // volume change in milli dB
+        StdUnit_t unit = args->arg(1)->asNumber()->unitType();
+        vmint volume =
+            (unit) ?
+                args->arg(1)->asNumber()->evalCastInt(VM_MILLI,VM_DECI) :
+                args->arg(1)->asNumber()->evalCastInt(); // volume change in milli dB
+        bool isFinal = args->arg(1)->asNumber()->isFinal();
         bool relative = (args->argsCount() >= 3) ? (args->arg(2)->asInt()->evalInt() & 1) : false;
         const float fVolumeLin = RTMath::DecibelToLinRatio(float(volume) / 1000.f);
 
@@ -403,9 +657,10 @@ namespace LinuxSampler {
                 pNote->Override.VolumeTime <= DEFAULT_NOTE_VOLUME_TIME_S)
             {
                 if (relative)
-                    pNote->Override.Volume *= fVolumeLin;
+                    pNote->Override.Volume.Value *= fVolumeLin;
                 else
-                    pNote->Override.Volume = fVolumeLin;
+                    pNote->Override.Volume.Value = fVolumeLin;
+                pNote->Override.Volume.Final = isFinal;
             } else { // otherwise schedule the volume change ...
                 Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                 e.Init(); // clear IDs
@@ -413,13 +668,14 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_volume;
                 e.Param.NoteSynthParam.Delta    = fVolumeLin;
-                e.Param.NoteSynthParam.Relative = relative;
-
+                e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                    isFinal, relative, unit
+                );
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -433,9 +689,10 @@ namespace LinuxSampler {
                     pNote->Override.VolumeTime <= DEFAULT_NOTE_VOLUME_TIME_S)
                 {
                     if (relative)
-                        pNote->Override.Volume *= fVolumeLin;
+                        pNote->Override.Volume.Value *= fVolumeLin;
                     else
-                        pNote->Override.Volume = fVolumeLin;
+                        pNote->Override.Volume.Value = fVolumeLin;
+                    pNote->Override.Volume.Final = isFinal;
                 } else { // otherwise schedule the volume change ...
                     Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                     e.Init(); // clear IDs
@@ -443,8 +700,9 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_volume;
                     e.Param.NoteSynthParam.Delta    = fVolumeLin;
-                    e.Param.NoteSynthParam.Relative = relative;
-
+                    e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                        isFinal, relative, unit
+                    );
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
             }
@@ -460,15 +718,30 @@ namespace LinuxSampler {
     {
     }
 
-    bool InstrumentScriptVMFunction_change_tune::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_change_tune::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
+        else if (iArg == 1)
+            return type == INT_EXPR || type == REAL_EXPR;
         else
             return type == INT_EXPR;
     }
 
+    bool InstrumentScriptVMFunction_change_tune::acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const {
+        return iArg == 1;
+    }
+
+    bool InstrumentScriptVMFunction_change_tune::acceptsArgFinal(vmint iArg) const {
+        return iArg == 1;
+    }
+
     VMFnResult* InstrumentScriptVMFunction_change_tune::exec(VMFnArgs* args) {
-        int tune = args->arg(1)->asInt()->evalInt(); // tuning change in milli cents
+        vmint tune =
+            (args->arg(1)->asNumber()->hasUnitFactorNow())
+                ? args->arg(1)->asNumber()->evalCastInt(VM_MILLI,VM_CENTI)
+                : args->arg(1)->asNumber()->evalCastInt(); // tuning change in milli cents
+        bool isFinal = args->arg(1)->asNumber()->isFinal();
+        StdUnit_t unit = args->arg(1)->asNumber()->unitType();
         bool relative = (args->argsCount() >= 3) ? (args->arg(2)->asInt()->evalInt() & 1) : false;
         const float fFreqRatio = RTMath::CentsToFreqRatioUnlimited(float(tune) / 1000.f);
 
@@ -496,9 +769,10 @@ namespace LinuxSampler {
                 pNote->Override.PitchTime <= DEFAULT_NOTE_PITCH_TIME_S)
             {
                 if (relative) 
-                    pNote->Override.Pitch *= fFreqRatio;
+                    pNote->Override.Pitch.Value *= fFreqRatio;
                 else
-                    pNote->Override.Pitch = fFreqRatio;
+                    pNote->Override.Pitch.Value = fFreqRatio;
+                pNote->Override.Pitch.Final = isFinal;
             } else { // otherwise schedule tuning change ...
                 Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                 e.Init(); // clear IDs
@@ -506,13 +780,14 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_pitch;
                 e.Param.NoteSynthParam.Delta    = fFreqRatio;
-                e.Param.NoteSynthParam.Relative = relative;
-
+                e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                    isFinal, relative, unit
+                );
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -526,9 +801,10 @@ namespace LinuxSampler {
                     pNote->Override.PitchTime <= DEFAULT_NOTE_PITCH_TIME_S)
                 {
                     if (relative) 
-                        pNote->Override.Pitch *= fFreqRatio;
+                        pNote->Override.Pitch.Value *= fFreqRatio;
                     else
-                        pNote->Override.Pitch = fFreqRatio;
+                        pNote->Override.Pitch.Value = fFreqRatio;
+                    pNote->Override.Pitch.Final = isFinal;
                 } else { // otherwise schedule tuning change ...
                     Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                     e.Init(); // clear IDs
@@ -536,8 +812,9 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_pitch;
                     e.Param.NoteSynthParam.Delta    = fFreqRatio;
-                    e.Param.NoteSynthParam.Relative = relative;
-
+                    e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                        isFinal, relative, unit
+                    );
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
             }
@@ -553,15 +830,20 @@ namespace LinuxSampler {
     {
     }
 
-    bool InstrumentScriptVMFunction_change_pan::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_change_pan::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
         else
             return type == INT_EXPR;
     }
 
+    bool InstrumentScriptVMFunction_change_pan::acceptsArgFinal(vmint iArg) const {
+        return iArg == 1;
+    }
+
     VMFnResult* InstrumentScriptVMFunction_change_pan::exec(VMFnArgs* args) {
-        int pan = args->arg(1)->asInt()->evalInt();
+        vmint pan    = args->arg(1)->asInt()->evalInt();
+        bool isFinal = args->arg(1)->asInt()->isFinal();
         bool relative = (args->argsCount() >= 3) ? (args->arg(2)->asInt()->evalInt() & 1) : false;
 
         if (pan > 1000) {
@@ -594,11 +876,12 @@ namespace LinuxSampler {
             // then immediately apply the panning to Note object
             if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
                 if (relative) {
-                    pNote->Override.Pan = RTMath::RelativeSummedAvg(pNote->Override.Pan, fPan, ++pNote->Override.PanSources);
+                    pNote->Override.Pan.Value = RTMath::RelativeSummedAvg(pNote->Override.Pan.Value, fPan, ++pNote->Override.Pan.Sources);
                 } else {
-                    pNote->Override.Pan = fPan;
-                    pNote->Override.PanSources = 1; // only relevant on subsequent change_pan() calls on same note with 'relative' being set
+                    pNote->Override.Pan.Value = fPan;
+                    pNote->Override.Pan.Sources = 1; // only relevant on subsequent change_pan() calls on same note with 'relative' being set
                 }
+                pNote->Override.Pan.Final = isFinal;
             } else { // otherwise schedule panning change ...
                 Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                 e.Init(); // clear IDs
@@ -606,13 +889,14 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_pan;
                 e.Param.NoteSynthParam.Delta    = fPan;
-                e.Param.NoteSynthParam.Relative = relative;
-
+                e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                    isFinal, relative, false
+                );
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -623,11 +907,12 @@ namespace LinuxSampler {
                 // then immediately apply the panning to Note object
                 if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
                     if (relative) {
-                        pNote->Override.Pan = RTMath::RelativeSummedAvg(pNote->Override.Pan, fPan, ++pNote->Override.PanSources);
+                        pNote->Override.Pan.Value = RTMath::RelativeSummedAvg(pNote->Override.Pan.Value, fPan, ++pNote->Override.Pan.Sources);
                     } else {
-                        pNote->Override.Pan = fPan;
-                        pNote->Override.PanSources = 1; // only relevant on subsequent change_pan() calls on same note with 'relative' being set
+                        pNote->Override.Pan.Value = fPan;
+                        pNote->Override.Pan.Sources = 1; // only relevant on subsequent change_pan() calls on same note with 'relative' being set
                     }
+                    pNote->Override.Pan.Final = isFinal;
                 } else { // otherwise schedule panning change ...
                     Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                     e.Init(); // clear IDs
@@ -635,8 +920,9 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_pan;
                     e.Param.NoteSynthParam.Delta    = fPan;
-                    e.Param.NoteSynthParam.Relative = relative;
-
+                    e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                        isFinal, relative, false
+                    );
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
             }
@@ -646,6 +932,7 @@ namespace LinuxSampler {
     }
 
     #define VM_FILTER_PAR_MAX_VALUE 1000000
+    #define VM_FILTER_PAR_MAX_HZ 30000
     #define VM_EG_PAR_MAX_VALUE 1000000
 
     // change_cutoff() function
@@ -655,23 +942,67 @@ namespace LinuxSampler {
     {
     }
 
-    bool InstrumentScriptVMFunction_change_cutoff::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_change_cutoff::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
+        else if (iArg == 1)
+            return type == INT_EXPR || type == REAL_EXPR;
         else
             return type == INT_EXPR;
     }
 
+    bool InstrumentScriptVMFunction_change_cutoff::acceptsArgUnitType(vmint iArg, StdUnit_t type) const {
+        if (iArg == 1)
+            return type == VM_NO_UNIT || type == VM_HERTZ;
+        else
+            return type == VM_NO_UNIT;
+    }
+
+    bool InstrumentScriptVMFunction_change_cutoff::acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const {
+        return iArg == 1 && type == VM_HERTZ; // only allow metric prefix(es) if 'Hz' is used as unit type
+    }
+
+    bool InstrumentScriptVMFunction_change_cutoff::acceptsArgFinal(vmint iArg) const {
+        return iArg == 1;
+    }
+
+    void InstrumentScriptVMFunction_change_cutoff::checkArgs(VMFnArgs* args,
+                                                             std::function<void(String)> err,
+                                                             std::function<void(String)> wrn)
+    {
+        // super class checks
+        Super::checkArgs(args, err, wrn);
+
+        // own checks ...
+        if (args->argsCount() >= 2) {
+            VMNumberExpr* argCutoff = args->arg(1)->asNumber();
+            if (argCutoff->unitType() && !argCutoff->isFinal()) {
+                wrn("Argument 2 implies 'final' value when using Hz as unit for cutoff frequency.");
+            }
+        }
+    }
+
     VMFnResult* InstrumentScriptVMFunction_change_cutoff::exec(VMFnArgs* args) {
-        int cutoff = args->arg(1)->asInt()->evalInt();
-        if (cutoff > VM_FILTER_PAR_MAX_VALUE) {
-            wrnMsg("change_cutoff(): argument 2 may not be larger than 1000000");
-            cutoff = VM_FILTER_PAR_MAX_VALUE;
+        const StdUnit_t unit = args->arg(1)->asNumber()->unitType();
+        vmint cutoff =
+            (unit) ?
+                args->arg(1)->asNumber()->evalCastInt(VM_NO_PREFIX) :
+                args->arg(1)->asNumber()->evalCastInt();
+        const bool isFinal =
+            (unit) ?
+                true : // imply 'final' value if unit type is used
+                args->arg(1)->asNumber()->isFinal();
+        // note: intentionally not checking against a max. value here if no unit!
+        // (to allow i.e. passing 2000000 for doubling cutoff frequency)
+        if (unit && cutoff > VM_FILTER_PAR_MAX_HZ) {
+            wrnMsg("change_cutoff(): argument 2 may not be larger than " strfy(VM_FILTER_PAR_MAX_HZ) " Hz");
+            cutoff = VM_FILTER_PAR_MAX_HZ;
         } else if (cutoff < 0) {
             wrnMsg("change_cutoff(): argument 2 may not be negative");
             cutoff = 0;
         }
-        const float fCutoff = float(cutoff) / float(VM_FILTER_PAR_MAX_VALUE);
+        const float fCutoff =
+            (unit) ? cutoff : float(cutoff) / float(VM_FILTER_PAR_MAX_VALUE);
 
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
@@ -693,7 +1024,8 @@ namespace LinuxSampler {
             // if change_cutoff() was called immediately after note was triggered
             // then immediately apply cutoff to Note object
             if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                pNote->Override.Cutoff = fCutoff;
+                pNote->Override.Cutoff.Value = fCutoff;
+                pNote->Override.Cutoff.Scope = NoteBase::scopeBy_FinalUnit(isFinal, unit);
             } else { // otherwise schedule cutoff change ...
                 Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                 e.Init(); // clear IDs
@@ -701,13 +1033,14 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_cutoff;
                 e.Param.NoteSynthParam.Delta    = fCutoff;
-                e.Param.NoteSynthParam.Relative = false;
-
+                e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                    isFinal, false, unit
+                );
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -717,7 +1050,8 @@ namespace LinuxSampler {
                 // if change_cutoff() was called immediately after note was triggered
                 // then immediately apply cutoff to Note object
                 if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                    pNote->Override.Cutoff = fCutoff;
+                    pNote->Override.Cutoff.Value = fCutoff;
+                    pNote->Override.Cutoff.Scope = NoteBase::scopeBy_FinalUnit(isFinal, unit);
                 } else { // otherwise schedule cutoff change ...
                     Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                     e.Init(); // clear IDs
@@ -725,8 +1059,9 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_cutoff;
                     e.Param.NoteSynthParam.Delta    = fCutoff;
-                    e.Param.NoteSynthParam.Relative = false;
-
+                    e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                        isFinal, false, unit
+                    );
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
             }
@@ -736,25 +1071,29 @@ namespace LinuxSampler {
     }
 
     // change_reso() function
-    
+
     InstrumentScriptVMFunction_change_reso::InstrumentScriptVMFunction_change_reso(InstrumentScriptVM* parent)
         : m_vm(parent)
     {
     }
 
-    bool InstrumentScriptVMFunction_change_reso::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_change_reso::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
         else
             return type == INT_EXPR;
     }
 
+    bool InstrumentScriptVMFunction_change_reso::acceptsArgFinal(vmint iArg) const {
+        return iArg == 1;
+    }
+
     VMFnResult* InstrumentScriptVMFunction_change_reso::exec(VMFnArgs* args) {
-        int resonance = args->arg(1)->asInt()->evalInt();
-        if (resonance > VM_FILTER_PAR_MAX_VALUE) {
-            wrnMsg("change_reso(): argument 2 may not be larger than 1000000");
-            resonance = VM_FILTER_PAR_MAX_VALUE;
-        } else if (resonance < 0) {
+        vmint resonance = args->arg(1)->asInt()->evalInt();
+        bool isFinal    = args->arg(1)->asInt()->isFinal();
+        // note: intentionally not checking against a max. value here!
+        // (to allow i.e. passing 2000000 for doubling the resonance)
+        if (resonance < 0) {
             wrnMsg("change_reso(): argument 2 may not be negative");
             resonance = 0;
         }
@@ -780,7 +1119,8 @@ namespace LinuxSampler {
             // if change_reso() was called immediately after note was triggered
             // then immediately apply resonance to Note object
             if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                pNote->Override.Resonance = fResonance;
+                pNote->Override.Resonance.Value = fResonance;
+                pNote->Override.Resonance.Final = isFinal;
             } else { // otherwise schedule resonance change ...
                 Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                 e.Init(); // clear IDs
@@ -788,13 +1128,14 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_resonance;
                 e.Param.NoteSynthParam.Delta    = fResonance;
-                e.Param.NoteSynthParam.Relative = false;
-
+                e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                    isFinal, false, false
+                );
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -804,7 +1145,8 @@ namespace LinuxSampler {
                 // if change_reso() was called immediately after note was triggered
                 // then immediately apply resonance to Note object
                 if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                    pNote->Override.Resonance = fResonance;
+                    pNote->Override.Resonance.Value = fResonance;
+                    pNote->Override.Resonance.Final = isFinal;
                 } else { // otherwise schedule resonance change ...
                     Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                     e.Init(); // clear IDs
@@ -812,8 +1154,9 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_resonance;
                     e.Param.NoteSynthParam.Delta    = fResonance;
-                    e.Param.NoteSynthParam.Relative = false;
-
+                    e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                        isFinal, false, false
+                    );
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
             }
@@ -821,30 +1164,76 @@ namespace LinuxSampler {
 
         return successResult();
     }
-    
+
     // change_attack() function
+    //
+    //TODO: Derive from generalized, shared template class
+    // VMChangeSynthParamFunction instead (like e.g. change_cutoff_attack()
+    // implementation below already does) to ease maintenance.
 
     InstrumentScriptVMFunction_change_attack::InstrumentScriptVMFunction_change_attack(InstrumentScriptVM* parent)
         : m_vm(parent)
     {
     }
 
-    bool InstrumentScriptVMFunction_change_attack::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_change_attack::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
         else
-            return type == INT_EXPR;
+            return type == INT_EXPR || type == REAL_EXPR;
+    }
+
+    bool InstrumentScriptVMFunction_change_attack::acceptsArgUnitType(vmint iArg, StdUnit_t type) const {
+        if (iArg == 1)
+            return type == VM_NO_UNIT || type == VM_SECOND;
+        else
+            return type == VM_NO_UNIT;
+    }
+
+    bool InstrumentScriptVMFunction_change_attack::acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const {
+        return iArg == 1 && type == VM_SECOND; // only allow metric prefix(es) if 'seconds' is used as unit type
+    }
+
+    bool InstrumentScriptVMFunction_change_attack::acceptsArgFinal(vmint iArg) const {
+        return iArg == 1;
+    }
+
+    void InstrumentScriptVMFunction_change_attack::checkArgs(VMFnArgs* args,
+                                                             std::function<void(String)> err,
+                                                             std::function<void(String)> wrn)
+    {
+        // super class checks
+        Super::checkArgs(args, err, wrn);
+
+        // own checks ...
+        if (args->argsCount() >= 2) {
+            VMNumberExpr* argTime = args->arg(1)->asNumber();
+            if (argTime->unitType() && !argTime->isFinal()) {
+                wrn("Argument 2 implies 'final' value when using seconds as unit for attack time.");
+            }
+        }
     }
 
     VMFnResult* InstrumentScriptVMFunction_change_attack::exec(VMFnArgs* args) {
-        int attack = args->arg(1)->asInt()->evalInt();
+        const StdUnit_t unit = args->arg(1)->asNumber()->unitType();
+        vmint attack =
+            (unit) ?
+                args->arg(1)->asNumber()->evalCastInt(VM_MICRO) :
+                args->arg(1)->asNumber()->evalCastInt();
+        const bool isFinal =
+            (unit) ?
+                true : // imply 'final' value if unit type is used
+                args->arg(1)->asNumber()->isFinal();
         // note: intentionally not checking against a max. value here!
         // (to allow i.e. passing 2000000 for doubling the attack time)
         if (attack < 0) {
             wrnMsg("change_attack(): argument 2 may not be negative");
             attack = 0;
         }
-        const float fAttack = float(attack) / float(VM_EG_PAR_MAX_VALUE);
+        const float fAttack =
+            (unit) ?
+                float(attack) / 1000000.f /* us -> s */ :
+                float(attack) / float(VM_EG_PAR_MAX_VALUE);
 
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
@@ -866,7 +1255,8 @@ namespace LinuxSampler {
             // if change_attack() was called immediately after note was triggered
             // then immediately apply attack to Note object
             if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                pNote->Override.Attack = fAttack;
+                pNote->Override.Attack.Value = fAttack;
+                pNote->Override.Attack.Scope = NoteBase::scopeBy_FinalUnit(isFinal, unit);
             } else { // otherwise schedule attack change ...
                 Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                 e.Init(); // clear IDs
@@ -874,13 +1264,14 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_attack;
                 e.Param.NoteSynthParam.Delta    = fAttack;
-                e.Param.NoteSynthParam.Relative = false;
-
+                e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                    isFinal, false, unit
+                );
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -890,7 +1281,8 @@ namespace LinuxSampler {
                 // if change_attack() was called immediately after note was triggered
                 // then immediately apply attack to Note object
                 if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                    pNote->Override.Attack = fAttack;
+                    pNote->Override.Attack.Value = fAttack;
+                    pNote->Override.Attack.Scope = NoteBase::scopeBy_FinalUnit(isFinal, unit);
                 } else { // otherwise schedule attack change ...
                     Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                     e.Init(); // clear IDs
@@ -898,8 +1290,9 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_attack;
                     e.Param.NoteSynthParam.Delta    = fAttack;
-                    e.Param.NoteSynthParam.Relative = false;
-
+                    e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                        isFinal, false, unit
+                    );
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
             }
@@ -909,28 +1302,74 @@ namespace LinuxSampler {
     }
 
     // change_decay() function
-    
+    //
+    //TODO: Derive from generalized, shared template class
+    // VMChangeSynthParamFunction instead (like e.g. change_cutoff_decay()
+    // implementation below already does) to ease maintenance.
+
     InstrumentScriptVMFunction_change_decay::InstrumentScriptVMFunction_change_decay(InstrumentScriptVM* parent)
         : m_vm(parent)
     {
     }
 
-    bool InstrumentScriptVMFunction_change_decay::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_change_decay::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
         else
-            return type == INT_EXPR;
+            return type == INT_EXPR || type == REAL_EXPR;
+    }
+
+    bool InstrumentScriptVMFunction_change_decay::acceptsArgUnitType(vmint iArg, StdUnit_t type) const {
+        if (iArg == 1)
+            return type == VM_NO_UNIT || type == VM_SECOND;
+        else
+            return type == VM_NO_UNIT;
+    }
+
+    bool InstrumentScriptVMFunction_change_decay::acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const {
+        return iArg == 1 && type == VM_SECOND; // only allow metric prefix(es) if 'seconds' is used as unit type
+    }
+
+    bool InstrumentScriptVMFunction_change_decay::acceptsArgFinal(vmint iArg) const {
+        return iArg == 1;
+    }
+
+    void InstrumentScriptVMFunction_change_decay::checkArgs(VMFnArgs* args,
+                                                            std::function<void(String)> err,
+                                                            std::function<void(String)> wrn)
+    {
+        // super class checks
+        Super::checkArgs(args, err, wrn);
+
+        // own checks ...
+        if (args->argsCount() >= 2) {
+            VMNumberExpr* argTime = args->arg(1)->asNumber();
+            if (argTime->unitType() && !argTime->isFinal()) {
+                wrn("Argument 2 implies 'final' value when using seconds as unit for decay time.");
+            }
+        }
     }
 
     VMFnResult* InstrumentScriptVMFunction_change_decay::exec(VMFnArgs* args) {
-        int decay = args->arg(1)->asInt()->evalInt();
+        const StdUnit_t unit = args->arg(1)->asNumber()->unitType();
+        vmint decay =
+            (unit) ?
+                args->arg(1)->asNumber()->evalCastInt(VM_MICRO) :
+                args->arg(1)->asNumber()->evalCastInt();
+        const bool isFinal =
+            (unit) ?
+                true : // imply 'final' value if unit type is used
+                args->arg(1)->asNumber()->isFinal();
         // note: intentionally not checking against a max. value here!
         // (to allow i.e. passing 2000000 for doubling the decay time)
         if (decay < 0) {
             wrnMsg("change_decay(): argument 2 may not be negative");
             decay = 0;
         }
-        const float fDecay = float(decay) / float(VM_EG_PAR_MAX_VALUE);
+        const float fDecay =
+            (unit) ?
+                float(decay) / 1000000.f /* us -> s */ :
+                float(decay) / float(VM_EG_PAR_MAX_VALUE);
 
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
@@ -952,7 +1391,8 @@ namespace LinuxSampler {
             // if change_decay() was called immediately after note was triggered
             // then immediately apply decay to Note object
             if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                pNote->Override.Decay = fDecay;
+                pNote->Override.Decay.Value = fDecay;
+                pNote->Override.Decay.Scope = NoteBase::scopeBy_FinalUnit(isFinal, unit);
             } else { // otherwise schedule decay change ...
                 Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                 e.Init(); // clear IDs
@@ -960,13 +1400,14 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_decay;
                 e.Param.NoteSynthParam.Delta    = fDecay;
-                e.Param.NoteSynthParam.Relative = false;
-
+                e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                    isFinal, false, unit
+                );
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -976,7 +1417,8 @@ namespace LinuxSampler {
                 // if change_decay() was called immediately after note was triggered
                 // then immediately apply decay to Note object
                 if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                    pNote->Override.Decay = fDecay;
+                    pNote->Override.Decay.Value = fDecay;
+                    pNote->Override.Decay.Scope = NoteBase::scopeBy_FinalUnit(isFinal, unit);
                 } else { // otherwise schedule decay change ...
                     Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                     e.Init(); // clear IDs
@@ -984,8 +1426,9 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_decay;
                     e.Param.NoteSynthParam.Delta    = fDecay;
-                    e.Param.NoteSynthParam.Relative = false;
-
+                    e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                        isFinal, false, unit
+                    );
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
             }
@@ -995,28 +1438,74 @@ namespace LinuxSampler {
     }
 
     // change_release() function
-    
+    //
+    //TODO: Derive from generalized, shared template class
+    // VMChangeSynthParamFunction instead (like e.g. change_cutoff_release()
+    // implementation below already does) to ease maintenance.
+
     InstrumentScriptVMFunction_change_release::InstrumentScriptVMFunction_change_release(InstrumentScriptVM* parent)
         : m_vm(parent)
     {
     }
 
-    bool InstrumentScriptVMFunction_change_release::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_change_release::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
         else
-            return type == INT_EXPR;
+            return type == INT_EXPR || type == REAL_EXPR;
+    }
+
+    bool InstrumentScriptVMFunction_change_release::acceptsArgUnitType(vmint iArg, StdUnit_t type) const {
+        if (iArg == 1)
+            return type == VM_NO_UNIT || type == VM_SECOND;
+        else
+            return type == VM_NO_UNIT;
+    }
+
+    bool InstrumentScriptVMFunction_change_release::acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const {
+        return iArg == 1 && type == VM_SECOND; // only allow metric prefix(es) if 'seconds' is used as unit type
+    }
+
+    bool InstrumentScriptVMFunction_change_release::acceptsArgFinal(vmint iArg) const {
+        return iArg == 1;
+    }
+
+    void InstrumentScriptVMFunction_change_release::checkArgs(VMFnArgs* args,
+                                                              std::function<void(String)> err,
+                                                              std::function<void(String)> wrn)
+    {
+        // super class checks
+        Super::checkArgs(args, err, wrn);
+
+        // own checks ...
+        if (args->argsCount() >= 2) {
+            VMNumberExpr* argTime = args->arg(1)->asNumber();
+            if (argTime->unitType() && !argTime->isFinal()) {
+                wrn("Argument 2 implies 'final' value when using seconds as unit for release time.");
+            }
+        }
     }
 
     VMFnResult* InstrumentScriptVMFunction_change_release::exec(VMFnArgs* args) {
-        int release = args->arg(1)->asInt()->evalInt();
+        const StdUnit_t unit = args->arg(1)->asNumber()->unitType();
+        vmint release =
+            (unit) ?
+                args->arg(1)->asNumber()->evalCastInt(VM_MICRO) :
+                args->arg(1)->asNumber()->evalCastInt();
+        const bool isFinal =
+            (unit) ?
+                true : // imply 'final' value if unit type is used
+                args->arg(1)->asNumber()->isFinal();
         // note: intentionally not checking against a max. value here!
         // (to allow i.e. passing 2000000 for doubling the release time)
         if (release < 0) {
             wrnMsg("change_release(): argument 2 may not be negative");
             release = 0;
         }
-        const float fRelease = float(release) / float(VM_EG_PAR_MAX_VALUE);
+        const float fRelease =
+            (unit) ?
+                float(release) / 1000000.f /* us -> s */ :
+                float(release) / float(VM_EG_PAR_MAX_VALUE);
 
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
@@ -1038,7 +1527,8 @@ namespace LinuxSampler {
             // if change_release() was called immediately after note was triggered
             // then immediately apply relase to Note object
             if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                pNote->Override.Release = fRelease;
+                pNote->Override.Release.Value = fRelease;
+                pNote->Override.Release.Scope = NoteBase::scopeBy_FinalUnit(isFinal, unit);
             } else { // otherwise schedule release change ...
                 Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                 e.Init(); // clear IDs
@@ -1046,13 +1536,14 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_release;
                 e.Param.NoteSynthParam.Delta    = fRelease;
-                e.Param.NoteSynthParam.Relative = false;
-
+                e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                    isFinal, false, unit
+                );
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -1062,7 +1553,8 @@ namespace LinuxSampler {
                 // if change_release() was called immediately after note was triggered
                 // then immediately apply relase to Note object
                 if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                    pNote->Override.Release = fRelease;
+                    pNote->Override.Release.Value = fRelease;
+                    pNote->Override.Release.Scope = NoteBase::scopeBy_FinalUnit(isFinal, unit);
                 } else { // otherwise schedule release change ...
                     Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                     e.Init(); // clear IDs
@@ -1070,8 +1562,9 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_release;
                     e.Param.NoteSynthParam.Delta    = fRelease;
-                    e.Param.NoteSynthParam.Relative = false;
-
+                    e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                        isFinal, false, unit
+                    );
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
             }
@@ -1082,33 +1575,120 @@ namespace LinuxSampler {
 
     // template for change_*() functions
 
-    bool VMChangeSynthParamFunction::acceptsArgType(int iArg, ExprType_t type) const {
+    bool VMChangeSynthParamFunction::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
         else
-            return type == INT_EXPR;
+            return type == INT_EXPR || (m_acceptReal && type == REAL_EXPR);
+    }
+
+    bool VMChangeSynthParamFunction::acceptsArgUnitType(vmint iArg, StdUnit_t type) const {
+        if (iArg == 1)
+            return type == VM_NO_UNIT || type == m_unit;
+        else
+            return type == VM_NO_UNIT;
+    }
+
+    bool VMChangeSynthParamFunction::acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const {
+        return m_acceptUnitPrefix && iArg == 1 && type == m_unit; // only allow metric prefix(es) if approprirate unit type is used (e.g. Hz)
+    }
+
+    bool VMChangeSynthParamFunction::acceptsArgFinal(vmint iArg) const {
+        return (m_acceptFinal) ? (iArg == 1) : false;
+    }
+
+    inline static void setNoteParamScopeBy_FinalUnit(NoteBase::Param& param, const bool bFinal, const StdUnit_t unit) {
+        param.Scope = NoteBase::scopeBy_FinalUnit(bFinal, unit);
+    }
+
+    inline static void setNoteParamScopeBy_FinalUnit(NoteBase::Norm& param, const bool bFinal, const StdUnit_t unit) {
+        param.Final = bFinal;
+    }
+
+    inline static void setNoteParamScopeBy_FinalUnit(float& param, const bool bFinal, const StdUnit_t unit) {
+        /* NOOP */
+    }
+
+    template<class T>
+    inline static void setNoteParamValue(T& param, vmfloat value) {
+        param.Value = value;
+    }
+
+    inline static void setNoteParamValue(float& param, vmfloat value) {
+        param = value;
+    }
+
+    void VMChangeSynthParamFunction::checkArgs(VMFnArgs* args,
+                                               std::function<void(String)> err,
+                                               std::function<void(String)> wrn)
+    {
+        // super class checks
+        Super::checkArgs(args, err, wrn);
+
+        // own checks ...
+        if (m_unit && m_unit != VM_BEL && args->argsCount() >= 2) {
+            VMNumberExpr* arg = args->arg(1)->asNumber();
+            if (arg && arg->unitType() && !arg->isFinal()) {
+                wrn("Argument 2 implies 'final' value when unit type " +
+                    unitTypeStr(arg->unitType()) + " is used.");
+            }
+        }
     }
 
     // Arbitrarily chosen constant value symbolizing "no limit".
     #define NO_LIMIT 1315916909
 
-    template<float NoteBase::_Override::*T_noteParam, int T_synthParam,
-             bool T_isNormalizedParam, int T_maxValue, int T_minValue>
-    VMFnResult* VMChangeSynthParamFunction::execTemplate(VMFnArgs* args, const char* functionName) {
-        int value = args->arg(1)->asInt()->evalInt();
-        if (T_maxValue != NO_LIMIT && value > T_maxValue) {
-            wrnMsg(String(functionName) + "(): argument 2 may not be larger than " + ToString(T_maxValue));
-            value = T_maxValue;
-        } else if (T_minValue != NO_LIMIT && value < T_minValue) {
-            if (T_minValue == 0)
-                wrnMsg(String(functionName) + "(): argument 2 may not be negative");
-            else
-                wrnMsg(String(functionName) + "(): argument 2 may not be smaller than " + ToString(T_minValue));
-            value = T_minValue;
+    template<class T_NoteParamType, T_NoteParamType NoteBase::_Override::*T_noteParam,
+             vmint T_synthParam,
+             vmint T_minValueNorm, vmint T_maxValueNorm, bool T_normalizeNorm,
+             vmint T_minValueUnit, vmint T_maxValueUnit,
+             MetricPrefix_t T_unitPrefix0, MetricPrefix_t ... T_unitPrefixN>
+    VMFnResult* VMChangeSynthParamFunction::execTemplate(VMFnArgs* args, const char* functionName)
+    {
+        const StdUnit_t unit = args->arg(1)->asNumber()->unitType();
+        const bool isFinal =
+            (m_unit && m_unit != VM_BEL && unit) ?
+                true : // imply 'final' value if unit type is used (except of 'Bel' which may be relative)
+                args->arg(1)->asNumber()->isFinal();
+        vmint value =
+            (m_acceptUnitPrefix && ((m_unit && unit) || (!m_unit && args->arg(1)->asNumber()->hasUnitFactorNow())))
+                ? args->arg(1)->asNumber()->evalCastInt(T_unitPrefix0, T_unitPrefixN ...)
+                : args->arg(1)->asNumber()->evalCastInt();
+
+        // check if passed value is in allowed range
+        if (unit && m_unit) {
+            if (T_maxValueUnit != NO_LIMIT && value > T_maxValueUnit) {
+                wrnMsg(String(functionName) + "(): argument 2 may not be larger than " + ToString(T_maxValueUnit));
+                value = T_maxValueUnit;
+            } else if (T_minValueUnit != NO_LIMIT && value < T_minValueUnit) {
+                if (T_minValueUnit == 0)
+                    wrnMsg(String(functionName) + "(): argument 2 may not be negative");
+                else
+                    wrnMsg(String(functionName) + "(): argument 2 may not be smaller than " + ToString(T_minValueUnit));
+                value = T_minValueUnit;
+            }
+        } else { // value was passed to this function without a unit ...
+            if (T_maxValueNorm != NO_LIMIT && value > T_maxValueNorm) {
+                wrnMsg(String(functionName) + "(): argument 2 may not be larger than " + ToString(T_maxValueNorm));
+                value = T_maxValueNorm;
+            } else if (T_minValueNorm != NO_LIMIT && value < T_minValueNorm) {
+                if (T_minValueNorm == 0)
+                    wrnMsg(String(functionName) + "(): argument 2 may not be negative");
+                else
+                    wrnMsg(String(functionName) + "(): argument 2 may not be smaller than " + ToString(T_minValueNorm));
+                value = T_minValueNorm;
+            }
         }
-        const float fValue = (T_isNormalizedParam) ?
-            float(value) / float(T_maxValue) : // convert to 0.0 .. 1.0 value range
-            float(value) / 1000000.f; // assuming microseconds here, convert to seconds
+
+        // convert passed argument value to engine internal expected value range (i.e. 0.0 .. 1.0)
+        const float fValue =
+            (unit && m_unit) ?
+                (unit == VM_BEL) ?
+                    RTMath::DecibelToLinRatio(float(value) * float(T_unitPrefix0) /*i.e. mdB -> dB*/) :
+                    float(value) * VMUnit::unitFactor(T_unitPrefix0, T_unitPrefixN ...) /*i.e. us -> s*/ :
+                (T_normalizeNorm) ?
+                    float(value) / ((T_maxValueNorm != NO_LIMIT) ? float(T_maxValueNorm) : 1000000.f/* fallback: value range used for most */) :
+                    float(value) /* as is */;
 
         AbstractEngineChannel* pEngineChannel =
             static_cast<AbstractEngineChannel*>(m_vm->m_event->cause.pEngineChannel);
@@ -1131,7 +1711,11 @@ namespace LinuxSampler {
             // note was triggered then immediately apply the synth parameter
             // change to Note object
             if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                pNote->Override.*T_noteParam = fValue;
+                setNoteParamValue(pNote->Override.*T_noteParam, fValue);
+                setNoteParamScopeBy_FinalUnit(
+                    (pNote->Override.*T_noteParam),
+                    isFinal, unit
+                );
             } else { // otherwise schedule this synth parameter change ...
                 Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                 e.Init(); // clear IDs
@@ -1139,13 +1723,14 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = (Event::synth_param_t) T_synthParam;
                 e.Param.NoteSynthParam.Delta    = fValue;
-                e.Param.NoteSynthParam.Relative = false;
-
+                e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                    isFinal, false, unit
+                );
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -1156,7 +1741,11 @@ namespace LinuxSampler {
                 // note was triggered then immediately apply the synth parameter
                 // change to Note object
                 if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                    pNote->Override.*T_noteParam = fValue;
+                    setNoteParamValue(pNote->Override.*T_noteParam, fValue);
+                    setNoteParamScopeBy_FinalUnit(
+                        (pNote->Override.*T_noteParam),
+                        isFinal, unit
+                    );
                 } else { // otherwise schedule this synth parameter change ...
                     Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
                     e.Init(); // clear IDs
@@ -1164,8 +1753,9 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = (Event::synth_param_t) T_synthParam;
                     e.Param.NoteSynthParam.Delta    = fValue;
-                    e.Param.NoteSynthParam.Relative = false;
-
+                    e.Param.NoteSynthParam.Scope = Event::scopeBy_FinalRelativeUnit(
+                        isFinal, false, unit
+                    );
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
             }
@@ -1178,140 +1768,196 @@ namespace LinuxSampler {
 
     VMFnResult* InstrumentScriptVMFunction_change_sustain::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::Sustain),
                     &NoteBase::_Override::Sustain,
                     Event::synth_param_sustain,
-                    false, NO_LIMIT, 0>( args, "change_sustain" );
+                    /* if value passed without unit */
+                    0, NO_LIMIT, true,
+                    /* if value passed WITH 'Bel' unit */
+                    NO_LIMIT, NO_LIMIT, VM_MILLI, VM_DECI>( args, "change_sustain" );
     }
 
     // change_cutoff_attack() function
 
     VMFnResult* InstrumentScriptVMFunction_change_cutoff_attack::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::CutoffAttack),
                     &NoteBase::_Override::CutoffAttack,
                     Event::synth_param_cutoff_attack,
-                    false, NO_LIMIT, 0>( args, "change_cutoff_attack" );
+                    /* if value passed without unit */
+                    0, NO_LIMIT, true,
+                    /* if value passed with 'seconds' unit */
+                    0, NO_LIMIT, VM_MICRO>( args, "change_cutoff_attack" );
     }
 
     // change_cutoff_decay() function
 
     VMFnResult* InstrumentScriptVMFunction_change_cutoff_decay::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::CutoffDecay),
                     &NoteBase::_Override::CutoffDecay,
                     Event::synth_param_cutoff_decay,
-                    false, NO_LIMIT, 0>( args, "change_cutoff_decay" );
+                    /* if value passed without unit */
+                    0, NO_LIMIT, true,
+                    /* if value passed with 'seconds' unit */
+                    0, NO_LIMIT, VM_MICRO>( args, "change_cutoff_decay" );
     }
 
     // change_cutoff_sustain() function
 
     VMFnResult* InstrumentScriptVMFunction_change_cutoff_sustain::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::CutoffSustain),
                     &NoteBase::_Override::CutoffSustain,
                     Event::synth_param_cutoff_sustain,
-                    false, NO_LIMIT, 0>( args, "change_cutoff_sustain" );
+                    /* if value passed without unit */
+                    0, NO_LIMIT, true,
+                    /* if value passed WITH 'Bel' unit */
+                    NO_LIMIT, NO_LIMIT, VM_MILLI, VM_DECI>( args, "change_cutoff_sustain" );
     }
 
     // change_cutoff_release() function
 
     VMFnResult* InstrumentScriptVMFunction_change_cutoff_release::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::CutoffRelease),
                     &NoteBase::_Override::CutoffRelease,
                     Event::synth_param_cutoff_release,
-                    false, NO_LIMIT, 0>( args, "change_cutoff_release" );
+                    /* if value passed without unit */
+                    0, NO_LIMIT, true,
+                    /* if value passed with 'seconds' unit */
+                    0, NO_LIMIT, VM_MICRO>( args, "change_cutoff_release" );
     }
 
     // change_amp_lfo_depth() function
 
     VMFnResult* InstrumentScriptVMFunction_change_amp_lfo_depth::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::AmpLFODepth),
                     &NoteBase::_Override::AmpLFODepth,
                     Event::synth_param_amp_lfo_depth,
-                    true, 1000000, 0>( args, "change_amp_lfo_depth" );
+                    /* if value passed without unit */
+                    0, NO_LIMIT, true,
+                    /* not used (since this function does not accept unit) */
+                    NO_LIMIT, NO_LIMIT, VM_NO_PREFIX>( args, "change_amp_lfo_depth" );
     }
 
     // change_amp_lfo_freq() function
 
     VMFnResult* InstrumentScriptVMFunction_change_amp_lfo_freq::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::AmpLFOFreq),
                     &NoteBase::_Override::AmpLFOFreq,
                     Event::synth_param_amp_lfo_freq,
-                    true, 1000000, 0>( args, "change_amp_lfo_freq" );
+                    /* if value passed without unit */
+                    0, NO_LIMIT, true,
+                    /* if value passed with 'Hz' unit */
+                    0, 30000, VM_NO_PREFIX>( args, "change_amp_lfo_freq" );
     }
 
     // change_cutoff_lfo_depth() function
 
     VMFnResult* InstrumentScriptVMFunction_change_cutoff_lfo_depth::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::CutoffLFODepth),
                     &NoteBase::_Override::CutoffLFODepth,
                     Event::synth_param_cutoff_lfo_depth,
-                    true, 1000000, 0>( args, "change_cutoff_lfo_depth" );
+                    /* if value passed without unit */
+                    0, NO_LIMIT, true,
+                    /* not used (since this function does not accept unit) */
+                    NO_LIMIT, NO_LIMIT, VM_NO_PREFIX>( args, "change_cutoff_lfo_depth" );
     }
 
     // change_cutoff_lfo_freq() function
 
     VMFnResult* InstrumentScriptVMFunction_change_cutoff_lfo_freq::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::CutoffLFOFreq),
                     &NoteBase::_Override::CutoffLFOFreq,
                     Event::synth_param_cutoff_lfo_freq,
-                    true, 1000000, 0>( args, "change_cutoff_lfo_freq" );
+                    /* if value passed without unit */
+                    0, NO_LIMIT, true,
+                    /* if value passed with 'Hz' unit */
+                    0, 30000, VM_NO_PREFIX>( args, "change_cutoff_lfo_freq" );
     }
 
     // change_pitch_lfo_depth() function
 
     VMFnResult* InstrumentScriptVMFunction_change_pitch_lfo_depth::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::PitchLFODepth),
                     &NoteBase::_Override::PitchLFODepth,
                     Event::synth_param_pitch_lfo_depth,
-                    true, 1000000, 0>( args, "change_pitch_lfo_depth" );
+                    /* if value passed without unit */
+                    0, NO_LIMIT, true,
+                    /* not used (since this function does not accept unit) */
+                    NO_LIMIT, NO_LIMIT, VM_NO_PREFIX>( args, "change_pitch_lfo_depth" );
     }
 
     // change_pitch_lfo_freq() function
 
     VMFnResult* InstrumentScriptVMFunction_change_pitch_lfo_freq::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::PitchLFOFreq),
                     &NoteBase::_Override::PitchLFOFreq,
                     Event::synth_param_pitch_lfo_freq,
-                    true, 1000000, 0>( args, "change_pitch_lfo_freq" );
+                    /* if value passed without unit */
+                    0, NO_LIMIT, true,
+                    /* if value passed with 'Hz' unit */
+                    0, 30000, VM_NO_PREFIX>( args, "change_pitch_lfo_freq" );
     }
 
     // change_vol_time() function
 
     VMFnResult* InstrumentScriptVMFunction_change_vol_time::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::VolumeTime),
                     &NoteBase::_Override::VolumeTime,
                     Event::synth_param_volume_time,
-                    false, NO_LIMIT, 0>( args, "change_vol_time" );
+                    /* if value passed without unit (implying 'us' unit) */
+                    0, NO_LIMIT, true,
+                    /* if value passed with 'seconds' unit */
+                    0, NO_LIMIT, VM_MICRO>( args, "change_vol_time" );
     }
 
     // change_tune_time() function
 
     VMFnResult* InstrumentScriptVMFunction_change_tune_time::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
+                    decltype(NoteBase::_Override::PitchTime),
                     &NoteBase::_Override::PitchTime,
                     Event::synth_param_pitch_time,
-                    false, NO_LIMIT, 0>( args, "change_tune_time" );
+                    /* if value passed without unit (implying 'us' unit) */
+                    0, NO_LIMIT, true,
+                    /* if value passed with 'seconds' unit */
+                    0, NO_LIMIT, VM_MICRO>( args, "change_tune_time" );
     }
 
     // change_pan_time() function
 
     VMFnResult* InstrumentScriptVMFunction_change_pan_time::exec(VMFnArgs* args) {
         return VMChangeSynthParamFunction::execTemplate<
-        &NoteBase::_Override::PanTime,
-        Event::synth_param_pan_time,
-        false, NO_LIMIT, 0>( args, "change_pan_time" );
+                    decltype(NoteBase::_Override::PanTime),
+                    &NoteBase::_Override::PanTime,
+                    Event::synth_param_pan_time,
+                    /* if value passed without unit (implying 'us' unit) */
+                    0, NO_LIMIT, true,
+                    /* if value passed with 'seconds' unit */
+                    0, NO_LIMIT, VM_MICRO>( args, "change_pan_time" );
     }
 
     // template for change_*_curve() functions
 
-    bool VMChangeFadeCurveFunction::acceptsArgType(int iArg, ExprType_t type) const {
+    bool VMChangeFadeCurveFunction::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
         else
             return type == INT_EXPR;
     }
 
-    template<fade_curve_t NoteBase::_Override::*T_noteParam, int T_synthParam>
+    template<fade_curve_t NoteBase::_Override::*T_noteParam, vmint T_synthParam>
     VMFnResult* VMChangeFadeCurveFunction::execTemplate(VMFnArgs* args, const char* functionName) {
-        int value = args->arg(1)->asInt()->evalInt();
+        vmint value = args->arg(1)->asInt()->evalInt();
         switch (value) {
             case FADE_CURVE_LINEAR:
             case FADE_CURVE_EASE_IN_EASE_OUT:
@@ -1350,13 +1996,13 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = (Event::synth_param_t) T_synthParam;
                 e.Param.NoteSynthParam.Delta    = value;
-                e.Param.NoteSynthParam.Relative = false;
+                e.Param.NoteSynthParam.Scope = Event::ValueScope::RELATIVE; // actually ignored
 
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -1375,7 +2021,7 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = (Event::synth_param_t) T_synthParam;
                     e.Param.NoteSynthParam.Delta    = value;
-                    e.Param.NoteSynthParam.Relative = false;
+                    e.Param.NoteSynthParam.Scope = Event::ValueScope::RELATIVE; // actually ignored
 
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
@@ -1416,15 +2062,30 @@ namespace LinuxSampler {
     {
     }
 
-    bool InstrumentScriptVMFunction_fade_in::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_fade_in::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
         else
-            return type == INT_EXPR;
+            return type == INT_EXPR || type == REAL_EXPR;
+    }
+
+    bool InstrumentScriptVMFunction_fade_in::acceptsArgUnitType(vmint iArg, StdUnit_t type) const {
+        if (iArg == 1)
+            return type == VM_NO_UNIT || type == VM_SECOND;
+        else
+            return type == VM_NO_UNIT;
+    }
+
+    bool InstrumentScriptVMFunction_fade_in::acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const {
+        return iArg == 1 && type == VM_SECOND; // only allow metric prefix(es) if 'seconds' is used as unit type
     }
 
     VMFnResult* InstrumentScriptVMFunction_fade_in::exec(VMFnArgs* args) {
-        int duration = args->arg(1)->asInt()->evalInt();
+        StdUnit_t unit = args->arg(1)->asNumber()->unitType();
+        vmint duration =
+            (unit) ?
+                args->arg(1)->asNumber()->evalCastInt(VM_MICRO) :
+                args->arg(1)->asNumber()->evalCastInt();
         if (duration < 0) {
             wrnMsg("fade_in(): argument 2 may not be negative");
             duration = 0;
@@ -1452,7 +2113,7 @@ namespace LinuxSampler {
             // then immediately apply a start volume of zero to Note object,
             // as well as the fade in duration
             if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                pNote->Override.Volume = 0.f;
+                pNote->Override.Volume.Value = 0.f;
                 pNote->Override.VolumeTime = fDuration;
             } else { // otherwise schedule a "volume time" change with the requested fade in duration ...
                 Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
@@ -1461,7 +2122,7 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_volume_time;
                 e.Param.NoteSynthParam.Delta    = fDuration;
-                e.Param.NoteSynthParam.Relative = false;
+                e.Param.NoteSynthParam.Scope = Event::ValueScope::RELATIVE; // actually ignored
 
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
@@ -1474,7 +2135,7 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_volume;
                 e.Param.NoteSynthParam.Delta    = 1.f;
-                e.Param.NoteSynthParam.Relative = false;
+                e.Param.NoteSynthParam.Scope = Event::ValueScope::RELATIVE; // actually ignored
 
                 // scheduling with 0 delay would also work here, but +1 is more
                 // safe regarding potential future implementation changes of the
@@ -1483,7 +2144,7 @@ namespace LinuxSampler {
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -1494,7 +2155,7 @@ namespace LinuxSampler {
                 // then immediately apply a start volume of zero to Note object,
                 // as well as the fade in duration
                 if (m_vm->m_event->scheduleTime == pNote->triggerSchedTime) {
-                    pNote->Override.Volume = 0.f;
+                    pNote->Override.Volume.Value = 0.f;
                     pNote->Override.VolumeTime = fDuration;
                 } else { // otherwise schedule a "volume time" change with the requested fade in duration ...
                     Event e = m_vm->m_event->cause; // copy to get fragment time for "now"
@@ -1503,7 +2164,7 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_volume_time;
                     e.Param.NoteSynthParam.Delta    = fDuration;
-                    e.Param.NoteSynthParam.Relative = false;
+                    e.Param.NoteSynthParam.Scope = Event::ValueScope::RELATIVE; // actually ignored
 
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
@@ -1516,7 +2177,7 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_volume;
                     e.Param.NoteSynthParam.Delta    = 1.f;
-                    e.Param.NoteSynthParam.Relative = false;
+                    e.Param.NoteSynthParam.Scope = Event::ValueScope::RELATIVE; // actually ignored
 
                     // scheduling with 0 delay would also work here, but +1 is more
                     // safe regarding potential future implementation changes of the
@@ -1536,15 +2197,30 @@ namespace LinuxSampler {
     {
     }
 
-    bool InstrumentScriptVMFunction_fade_out::acceptsArgType(int iArg, ExprType_t type) const {
+    bool InstrumentScriptVMFunction_fade_out::acceptsArgType(vmint iArg, ExprType_t type) const {
         if (iArg == 0)
             return type == INT_EXPR || type == INT_ARR_EXPR;
         else
-            return type == INT_EXPR;
+            return type == INT_EXPR || type == REAL_EXPR;
+    }
+
+    bool InstrumentScriptVMFunction_fade_out::acceptsArgUnitType(vmint iArg, StdUnit_t type) const {
+        if (iArg == 1)
+            return type == VM_NO_UNIT || type == VM_SECOND;
+        else
+            return type == VM_NO_UNIT;
+    }
+
+    bool InstrumentScriptVMFunction_fade_out::acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const {
+        return iArg == 1 && type == VM_SECOND; // only allow metric prefix(es) if 'seconds' is used as unit type
     }
 
     VMFnResult* InstrumentScriptVMFunction_fade_out::exec(VMFnArgs* args) {
-        int duration = args->arg(1)->asInt()->evalInt();
+        StdUnit_t unit = args->arg(1)->asNumber()->unitType();
+        vmint duration =
+            (unit) ?
+                args->arg(1)->asNumber()->evalCastInt(VM_MICRO) :
+                args->arg(1)->asNumber()->evalCastInt();
         if (duration < 0) {
             wrnMsg("fade_out(): argument 2 may not be negative");
             duration = 0;
@@ -1581,7 +2257,7 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_volume_time;
                 e.Param.NoteSynthParam.Delta    = fDuration;
-                e.Param.NoteSynthParam.Relative = false;
+                e.Param.NoteSynthParam.Scope = Event::ValueScope::RELATIVE; // actually ignored
 
                 pEngineChannel->ScheduleEventMicroSec(&e, 0);
             }
@@ -1594,7 +2270,7 @@ namespace LinuxSampler {
                 e.Param.NoteSynthParam.NoteID   = id.noteID();
                 e.Param.NoteSynthParam.Type     = Event::synth_param_volume;
                 e.Param.NoteSynthParam.Delta    = 0.f;
-                e.Param.NoteSynthParam.Relative = false;
+                e.Param.NoteSynthParam.Scope = Event::ValueScope::RELATIVE; // actually ignored
 
                 // scheduling with 0 delay would also work here, but +1 is more
                 // safe regarding potential future implementation changes of the
@@ -1615,7 +2291,7 @@ namespace LinuxSampler {
             }
         } else if (args->arg(0)->exprType() == INT_ARR_EXPR) {
             VMIntArrayExpr* ids = args->arg(0)->asIntArray();
-            for (int i = 0; i < ids->arraySize(); ++i) {
+            for (vmint i = 0; i < ids->arraySize(); ++i) {
                 const ScriptID id = ids->evalIntElement(i);
                 if (!id || !id.isNoteID()) continue;
 
@@ -1633,7 +2309,7 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_volume_time;
                     e.Param.NoteSynthParam.Delta    = fDuration;
-                    e.Param.NoteSynthParam.Relative = false;
+                    e.Param.NoteSynthParam.Scope = Event::ValueScope::RELATIVE; // actually ignored
 
                     pEngineChannel->ScheduleEventMicroSec(&e, 0);
                 }
@@ -1646,7 +2322,7 @@ namespace LinuxSampler {
                     e.Param.NoteSynthParam.NoteID   = id.noteID();
                     e.Param.NoteSynthParam.Type     = Event::synth_param_volume;
                     e.Param.NoteSynthParam.Delta    = 0.f;
-                    e.Param.NoteSynthParam.Relative = false;
+                    e.Param.NoteSynthParam.Scope = Event::ValueScope::RELATIVE; // actually ignored
 
                     // scheduling with 0 delay would also work here, but +1 is more
                     // safe regarding potential future implementation changes of the
@@ -1662,7 +2338,7 @@ namespace LinuxSampler {
                     e.Type = Event::type_kill_note;
                     e.Param.Note.ID = id.noteID();
                     e.Param.Note.Key = pNote->hostKey;
-                    
+
                     pEngineChannel->ScheduleEventMicroSec(&e, duration + 1);
                 }
             }
@@ -1698,7 +2374,7 @@ namespace LinuxSampler {
             return successResult(0);
         }
 
-        const int parameter = args->arg(1)->asInt()->evalInt();
+        const vmint parameter = args->arg(1)->asInt()->evalInt();
         switch (parameter) {
             case EVENT_PAR_NOTE:
                 return successResult(pNote->cause.Param.Note.Key);
@@ -1706,11 +2382,11 @@ namespace LinuxSampler {
                 return successResult(pNote->cause.Param.Note.Velocity);
             case EVENT_PAR_VOLUME:
                 return successResult(
-                    RTMath::LinRatioToDecibel(pNote->Override.Volume) * 1000.f
+                    RTMath::LinRatioToDecibel(pNote->Override.Volume.Value) * 1000.f
                 );
             case EVENT_PAR_TUNE:
                 return successResult(
-                     RTMath::FreqRatioToCents(pNote->Override.Pitch) * 1000.f
+                     RTMath::FreqRatioToCents(pNote->Override.Pitch.Value) * 1000.f
                 );
             case EVENT_PAR_0:
                 return successResult(pNote->userPar[0]);
@@ -1750,8 +2426,8 @@ namespace LinuxSampler {
         NoteBase* pNote = pEngineChannel->pEngine->NoteByID( id.noteID() );
         if (!pNote) return successResult();
 
-        const int parameter = args->arg(1)->asInt()->evalInt();
-        const int value     = args->arg(2)->asInt()->evalInt();
+        const vmint parameter = args->arg(1)->asInt()->evalInt();
+        const vmint value     = args->arg(2)->asInt()->evalInt();
 
         switch (parameter) {
             case EVENT_PAR_NOTE:
@@ -1826,7 +2502,7 @@ namespace LinuxSampler {
         NoteBase* pNote = pEngineChannel->pEngine->NoteByID( id.noteID() );
         if (!pNote) return successResult();
 
-        const int value = args->arg(1)->asInt()->evalInt();
+        const vmint value = args->arg(1)->asInt()->evalInt();
         if (value < 0 || value > 127) {
             wrnMsg("change_note(): note number of argument 2 is out of range");
             return successResult();
@@ -1866,7 +2542,7 @@ namespace LinuxSampler {
         NoteBase* pNote = pEngineChannel->pEngine->NoteByID( id.noteID() );
         if (!pNote) return successResult();
 
-        const int value = args->arg(1)->asInt()->evalInt();
+        const vmint value = args->arg(1)->asInt()->evalInt();
         if (value < 0 || value > 127) {
             wrnMsg("change_velo(): velocity of argument 2 is out of range");
             return successResult();
@@ -1885,8 +2561,26 @@ namespace LinuxSampler {
     // change_play_pos() function
 
     InstrumentScriptVMFunction_change_play_pos::InstrumentScriptVMFunction_change_play_pos(InstrumentScriptVM* parent)
-    : m_vm(parent)
+        : m_vm(parent)
     {
+    }
+
+    bool InstrumentScriptVMFunction_change_play_pos::acceptsArgType(vmint iArg, ExprType_t type) const {
+        if (iArg == 0)
+            return type == INT_EXPR;
+        else
+            return type == INT_EXPR || type == REAL_EXPR;
+    }
+
+    bool InstrumentScriptVMFunction_change_play_pos::acceptsArgUnitType(vmint iArg, StdUnit_t type) const {
+        if (iArg == 1)
+            return type == VM_NO_UNIT || type == VM_SECOND;
+        else
+            return type == VM_NO_UNIT;
+    }
+
+    bool InstrumentScriptVMFunction_change_play_pos::acceptsArgUnitPrefix(vmint iArg, StdUnit_t type) const {
+        return iArg == 1 && type == VM_SECOND; // only allow metric prefix(es) if 'seconds' is used as unit type
     }
 
     VMFnResult* InstrumentScriptVMFunction_change_play_pos::exec(VMFnArgs* args) {
@@ -1900,7 +2594,11 @@ namespace LinuxSampler {
             return successResult();
         }
 
-        const int pos = args->arg(1)->asInt()->evalInt();
+        StdUnit_t unit = args->arg(1)->asNumber()->unitType();
+        const vmint pos =
+            (unit) ?
+                args->arg(1)->asNumber()->evalCastInt(VM_MICRO) :
+                args->arg(1)->asNumber()->evalCastInt();
         if (pos < 0) {
             wrnMsg("change_play_pos(): playback position of argument 2 may not be negative");
             return successResult();
@@ -1912,7 +2610,8 @@ namespace LinuxSampler {
         NoteBase* pNote = pEngineChannel->pEngine->NoteByID( id.noteID() );
         if (!pNote) return successResult();
 
-        pNote->Override.SampleOffset = pos;
+        pNote->Override.SampleOffset =
+            (decltype(pNote->Override.SampleOffset)) pos;
 
         return successResult();
     }
@@ -1973,7 +2672,7 @@ namespace LinuxSampler {
 
     InstrumentScriptVMFunction_wait::InstrumentScriptVMFunction_wait(InstrumentScriptVM* parent)
         : CoreVMFunction_wait(parent)
-    {    
+    {
     }
 
     VMFnResult* InstrumentScriptVMFunction_wait::exec(VMFnArgs* args) {
@@ -1989,7 +2688,7 @@ namespace LinuxSampler {
 
     InstrumentScriptVMFunction_stop_wait::InstrumentScriptVMFunction_stop_wait(InstrumentScriptVM* parent)
         : m_vm(parent)
-    {    
+    {
     }
 
     VMFnResult* InstrumentScriptVMFunction_stop_wait::exec(VMFnArgs* args) {
@@ -2059,7 +2758,7 @@ namespace LinuxSampler {
 
         // if we are here, then this is the parent, so we must fork this parent
 
-        const int n =
+        const vmint n =
             (args->argsCount() >= 1) ? args->arg(0)->asInt()->evalInt() : 1;
         const bool bAutoAbort =
             (args->argsCount() >= 2) ? args->arg(1)->asInt()->evalInt() : true;
@@ -2085,9 +2784,9 @@ namespace LinuxSampler {
                 return errorResult(-1); // terminate script
             }
             // since both parent, as well all child script execution instances
-            // all land in this exect() method, the following is (more or less)
+            // all land in this exec() method, the following is (more or less)
             // the only feature that lets us distinguish the parent and
-            // respective children from each other in this exect() method
+            // respective children from each other in this exec() method
             itChild->forkIndex = iChild + 1;
         }
 

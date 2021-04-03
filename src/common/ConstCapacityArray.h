@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Christian Schoenebeck
+ * Copyright (c) 2014 - 2021 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -41,7 +41,7 @@ namespace LinuxSampler {
          *
          * @param capacity - maximum size this object may ever grow
          */
-        ConstCapacityArray(int capacity) :
+        ConstCapacityArray(ssize_t capacity) :
             m_data(new T[capacity]), m_capacity(capacity), m_size(0) {}
 
         /**
@@ -63,7 +63,7 @@ namespace LinuxSampler {
          *
          * @see capacity()
          */
-        inline uint size() const {
+        inline size_t size() const {
             return m_size;
         }
 
@@ -76,7 +76,7 @@ namespace LinuxSampler {
          *
          * @see size()
          */
-        inline uint capacity() const {
+        inline size_t capacity() const {
             return m_capacity;
         }
 
@@ -115,12 +115,19 @@ namespace LinuxSampler {
          * @param index - position where element(s) shall be removed
          * @param count - amount of elements to be removed
          */
-        inline void remove(uint index, uint count = 1) {
-            if (index >= m_size || index + count > m_size)
+        inline void remove(size_t index, size_t count = 1) {
+            if (index >= m_size)
                 return;
+            // special case: no elements behind the removed elements, so nothing
+            // to move
+            if (index + count >= m_size) {
+                m_size = index;
+                return;
+            }
             // don't use memmove() here! Since it is not RT safe with all libc
             // implementations and on all architectures
-            for (uint i = 0; i < count; ++i)
+            const size_t n = m_size - index - count;
+            for (size_t i = 0; i < n; ++i)
                 m_data[index + i] = m_data[index + i + count];
             m_size -= count;
         }
@@ -132,7 +139,7 @@ namespace LinuxSampler {
          * @param value - value to be searched for
          */
         bool contains(const T& value) const {
-            for (uint i = 0; i < m_size; ++i)
+            for (size_t i = 0; i < m_size; ++i)
                 if (m_data[i] == value) return true;
             return false;
         }
@@ -145,8 +152,8 @@ namespace LinuxSampler {
          * @param value - value to be searched for
          * @returns index of found element
          */
-        uint find(const T& value) const {
-            for (uint i = 0; i < m_size; ++i)
+        size_t find(const T& value) const {
+            for (size_t i = 0; i < m_size; ++i)
                 if (m_data[i] == value) return i;
             return -1;
         }
@@ -172,7 +179,7 @@ namespace LinuxSampler {
          *
          * @param index - position of array to access
          */
-        inline T& operator[](uint index) {
+        inline T& operator[](size_t index) {
             return m_data[index];
         }
 
@@ -185,14 +192,14 @@ namespace LinuxSampler {
          *
          * @param index - position of array to access
          */
-        inline const T& operator[](uint index) const {
+        inline const T& operator[](size_t index) const {
             return m_data[index];
         }
 
     private:
         T* __restrict const m_data;
-        int m_capacity;
-        int m_size;
+        ssize_t m_capacity;
+        ssize_t m_size;
     };
 
 } // namespace LinuxSampler

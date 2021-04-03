@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017 Christian Schoenebeck
+ * Copyright (c) 2014-2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -69,10 +69,43 @@ namespace LinuxSampler {
          * It is your responsibility to free the returned VMParserContext
          * object once you don't need it anymore.
          *
+         * The NKSP language supports so called 'patch' variables, which are
+         * declared by the dedicated keyword 'patch' (as variable qualifier) in
+         * real-time instrument scripts, like e.g.:
+         * @code
+         * on init
+         *   declare patch ~foo := 0.435
+         * end on
+         * @endcode
+         * These 'patch' variables allow to override their initial value (i.e.
+         * on a per instrument basis). In the example above, the script variable
+         * @c ~foo would be initialized with value @c 0.435 by default. However
+         * by simply passing an appropriate key-value pair with argument
+         * @p patchVars when calling this method, the NKSP parser will replace
+         * that default initialization value by the passed replacement value.
+         * So key of the optional @p patchVars map argument is the ('patch')
+         * variable name to be patched, and value is the replacement
+         * initialization value for the respective variable. You can see this as
+         * kind of preprocessor mechanism of the NKSP parser, so you are not
+         * limited to simply replace a scalar value with a different scalar
+         * value, you can actually replace any complex default initialization
+         * expression with a new (potentially complex) replacement expression,
+         * e.g. including function calls, formulas, etc.
+         *
+         * The optional 3rd argument @p patchVarsDef allows you to retrieve the
+         * default initialization value(s) of all 'patch' variables declared in
+         * the passed script itself. This is useful for instrument editors.
+         *
          * @param s - entire source code of the script to be loaded
+         * @param patchVars - (optional) replacement value for patch variables
+         * @param patchVarsDef - (optional) output of original values of patch
+         *                       variables
          * @returns parsed representation of the script
          */
-        VMParserContext* loadScript(const String& s);
+        VMParserContext* loadScript(const String& s,
+                                    const std::map<String,String>& patchVars =
+                                          std::map<String,String>(),
+                                    std::map<String,String>* patchVarsDef = NULL);
 
         /**
          * Same as above's loadScript() method, but this one reads the script's
@@ -80,9 +113,15 @@ namespace LinuxSampler {
          *
          * @param is - input stream from which the entire source code of the
          *             script is to be read and loaded from
+         * @param patchVars - (optional) replacement value for patch variables
+         * @param patchVarsDef - (optional) output of original values of patch
+         *                       variables
          * @returns parsed representation of the script
          */
-        VMParserContext* loadScript(std::istream* is);
+        VMParserContext* loadScript(std::istream* is,
+                                    const std::map<String,String>& patchVars =
+                                          std::map<String,String>(),
+                                    std::map<String,String>* patchVarsDef = NULL);
 
         /**
          * Parses a script's source code (passed as argument @a s to this
@@ -191,7 +230,7 @@ namespace LinuxSampler {
          * This method is re-implemented by deriving classes to add more use
          * case specific built-in variables.
          */
-        std::map<String,VMIntRelPtr*> builtInIntVariables() OVERRIDE;
+        std::map<String,VMIntPtr*> builtInIntVariables() OVERRIDE;
 
         /**
          * Returns all built-in (8 bit) integer array script variables. This
@@ -227,7 +266,25 @@ namespace LinuxSampler {
          * DECLARE_VMINT_READONLY() to define the variable for read-only
          * access by scripts.
          */
-        std::map<String,int> builtInConstIntVariables() OVERRIDE;
+        std::map<String,vmint> builtInConstIntVariables() OVERRIDE;
+
+        /**
+         * Returns all built-in constant real number (floating point) script
+         * variables, which are constant and their final data is already
+         * available at parser time and won't change during runtime. Providing
+         * your built-in constants this way may lead to performance benefits
+         * compared to using other ways of providing built-in variables, because
+         * the script parser can perform optimizations when the script is
+         * refering to such constants.
+         *
+         * This type of built-in variable can only be read, but not be altered
+         * by scripts. This method returns a STL map, where the map's key is
+         * the variable name and the map's value is the final constant data.
+         *
+         * This method is re-implemented by deriving classes to add more use
+         * case specific built-in constant real numbers.
+         */
+        std::map<String,vmfloat> builtInConstRealVariables() OVERRIDE;
 
         /**
          * Returns all built-in dynamic variables. This method returns a STL
@@ -267,14 +324,40 @@ namespace LinuxSampler {
          */
         bool isAutoSuspendEnabled() const;
 
+        /**
+         * By default (i.e. in production use) the built-in exit() function
+         * prohibits any arguments to be passed to its function by scripts. So
+         * by default, scripts trying to pass any arguments to the built-in
+         * exit() function will yield in a parser error.
+         *
+         * By calling this method the built-in exit() function will optionally
+         * accept one argument to be passed to its function call by scripts. The
+         * value of that function argument will become available by calling
+         * VMExecContext::exitResult() after execution of the script.
+         *
+         * @see VMExecContext::exitResult()
+         */
+        void setExitResultEnabled(bool b = true);
+
+        /**
+         * Returns @c true if the built-in exit() function optionally accepts
+         * a function argument by scripts.
+         *
+         * @see setExitResultEnabled()
+         */
+        bool isExitResultEnabled() const;
+
         VMEventHandler* currentVMEventHandler(); //TODO: should be protected (only usable during exec() calls, intended only for VMFunctions)
         VMParserContext* currentVMParserContext(); //TODO: should be protected (only usable during exec() calls, intended only for VMFunctions)
         VMExecContext* currentVMExecContext(); //TODO: should be protected (only usable during exec() calls, intended only for VMFunctions)
 
+    private:
+        VMParserContext* loadScriptOnePass(const String& s);
     protected:
         VMEventHandler* m_eventHandler;
         ParserContext* m_parserContext;
         bool m_autoSuspend;
+        bool m_acceptExitRes;
         class CoreVMFunction_message* m_fnMessage;
         class CoreVMFunction_exit* m_fnExit;
         class CoreVMFunction_wait* m_fnWait;
@@ -286,11 +369,30 @@ namespace LinuxSampler {
         class CoreVMFunction_in_range* m_fnInRange;
         class CoreVMFunction_sh_left* m_fnShLeft;
         class CoreVMFunction_sh_right* m_fnShRight;
+        class CoreVMFunction_msb* m_fnMsb;
+        class CoreVMFunction_lsb* m_fnLsb;
         class CoreVMFunction_min* m_fnMin;
         class CoreVMFunction_max* m_fnMax;
         class CoreVMFunction_array_equal* m_fnArrayEqual;
         class CoreVMFunction_search* m_fnSearch;
         class CoreVMFunction_sort* m_fnSort;
+        class CoreVMFunction_int_to_real* m_fnIntToReal;
+        class CoreVMFunction_real_to_int* m_fnRealToInt;
+        class CoreVMFunction_round* m_fnRound;
+        class CoreVMFunction_ceil* m_fnCeil;
+        class CoreVMFunction_floor* m_fnFloor;
+        class CoreVMFunction_sqrt* m_fnSqrt;
+        class CoreVMFunction_log* m_fnLog;
+        class CoreVMFunction_log2* m_fnLog2;
+        class CoreVMFunction_log10* m_fnLog10;
+        class CoreVMFunction_exp* m_fnExp;
+        class CoreVMFunction_pow* m_fnPow;
+        class CoreVMFunction_sin* m_fnSin;
+        class CoreVMFunction_cos* m_fnCos;
+        class CoreVMFunction_tan* m_fnTan;
+        class CoreVMFunction_asin* m_fnAsin;
+        class CoreVMFunction_acos* m_fnAcos;
+        class CoreVMFunction_atan* m_fnAtan;
         class CoreVMDynVar_NKSP_REAL_TIMER* m_varRealTimer;
         class CoreVMDynVar_NKSP_PERF_TIMER* m_varPerfTimer;
     };

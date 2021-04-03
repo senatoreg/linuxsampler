@@ -21,7 +21,10 @@
     yylloc->first_line = yylineno;      \
     yylloc->last_line  = yylineno;      \
     yylloc->first_column = yycolumn;    \
+    yylloc->first_byte = yyextra->nbytes; \
+    yylloc->length_bytes = (int) yyleng;  \
     yycolumn += yyleng;                 \
+    yyextra->nbytes += (int) yyleng;    \
     yylloc->last_column = yycolumn - 1; \
     /*printf("lex: line '%s'\n", yytext);*/  \
 }
@@ -38,11 +41,15 @@
 }
 
 static void scanner_error(YYLTYPE* locp, LinuxSampler::ParserContext* context, const char* err) {
-    context->addErr(locp->first_line, locp->last_line, locp->first_column, locp->last_column, err);
+    context->addErr(locp->first_line, locp->last_line, locp->first_column,
+                    locp->last_column, locp->first_byte, locp->length_bytes,
+                    err);
 }
 
 static void scanner_warning(YYLTYPE* locp, LinuxSampler::ParserContext* context, const char* txt) {
-    context->addWrn(locp->first_line, locp->last_line, locp->first_column, locp->last_column, txt);
+    context->addWrn(locp->first_line, locp->last_line, locp->first_column,
+                    locp->last_column, locp->first_byte, locp->length_bytes,
+                    txt);
 }
 
 #define SCANNER_ERR(txt)  scanner_error(yylloc, yyextra, txt)
@@ -108,25 +115,126 @@ static int countCharsPastLastNewLine(const char* txt) {
 %x PREPROC_SET_COND PREPROC_RESET_COND PREPROC_IF PREPROC_IF_NOT PREPROC_BODY_EAT PREPROC_PRE_BODY_USE PREPROC_PRE_BODY_EAT
 
 DIGIT    [0-9]
-ID       [a-zA-Z0-9_]+
+ID       [a-zA-Z][a-zA-Z0-9_]*
+METRIC   (k|h|(da)|d|c|m|u)
+UNIT     (s|(Hz)|B)
 
 %%
 
 \"[^"]*\" {
-    yylval->sValue = strdup(yytext + 1);
-    yylval->sValue[strlen(yylval->sValue) - 1] = '\0';
+    char* s = strdup(yytext + 1);
+    s[strlen(s) - 1] = '\0';
+    yylval->sValue = s;
+    yyextra->autoFreeAfterParse(s);
     return STRING;
 }
 
 {DIGIT}+ {
-    yylval->iValue = atoi(yytext);
+    if (sizeof(vmint) < 8)
+        yylval->iValue = atoi(yytext);
+    else
+        yylval->iValue = atoll(yytext);
     return INTEGER;
 }
 
- /* there is currently no support for floating point numbers in NKSP yet */
- /*{DIGIT}+"."{DIGIT}* {
-    printf("A float: %s (%g)\n", yytext, atof(yytext));
- }*/
+{DIGIT}+"."{DIGIT}+ {
+    yylval->fValue = atof(yytext);
+    return REAL;
+}
+
+{DIGIT}+({METRIC}{1,2}|({METRIC}{0,2}{UNIT}?)) {
+    int pos = 0;
+
+    // parse number portion
+    vmint value = 0;
+    for (; yytext[pos] >= '0' && yytext[pos] <= '9'; ++pos) {
+        value *= 10;
+        value += yytext[pos] - '0';
+    }
+    yylval->iUnitValue.iValue = value;
+
+    // parse metric prefix portion
+    for (int i = 0; i < 2; ++i, ++pos) {
+        switch (yytext[pos]) {
+            case 'k': yylval->iUnitValue.prefix[i] = VM_KILO;  continue;
+            case 'h': yylval->iUnitValue.prefix[i] = VM_HECTO; continue;
+            case 'c': yylval->iUnitValue.prefix[i] = VM_CENTI; continue;
+            case 'm': yylval->iUnitValue.prefix[i] = VM_MILLI; continue;
+            case 'u': yylval->iUnitValue.prefix[i] = VM_MICRO; continue;
+            case 'd':
+                if (yytext[pos+1] == 'a') {
+                    yylval->iUnitValue.prefix[i] = VM_DECA;
+                    ++pos;
+                } else {
+                    yylval->iUnitValue.prefix[i] = VM_DECI;
+                }
+                continue;
+            default:
+                yylval->iUnitValue.prefix[i] = VM_NO_PREFIX;
+                goto parseIntStdUnit;
+        }
+    }
+
+    parseIntStdUnit:
+
+    // parse standard measurement unit
+    switch (yytext[pos]) {
+        case 's': yylval->iUnitValue.unit = VM_SECOND;  break;
+        case 'H': yylval->iUnitValue.unit = VM_HERTZ;   break;
+        case 'B': yylval->iUnitValue.unit = VM_BEL;     break;
+        default:  yylval->iUnitValue.unit = VM_NO_UNIT; break;
+    }
+
+    return INTEGER_UNIT;
+}
+
+{DIGIT}+"."{DIGIT}+({METRIC}{1,2}|({METRIC}{0,2}{UNIT}?)) {
+    int pos = 0;
+
+    // parse number portion
+    for (; (yytext[pos] >= '0' && yytext[pos] <= '9') || yytext[pos] == '.'; ++pos) {
+    }
+    {
+        const char tmp = yytext[pos];
+        yytext[pos] = 0; // mark temporary end of string
+        yylval->fUnitValue.fValue = atof(yytext);
+        yytext[pos] = tmp; // restore
+    }
+
+    // parse metric prefix portion
+    for (int i = 0; i < 2; ++i, ++pos) {
+        switch (yytext[pos]) {
+            case 'k': yylval->fUnitValue.prefix[i] = VM_KILO;  continue;
+            case 'h': yylval->fUnitValue.prefix[i] = VM_HECTO; continue;
+            case 'c': yylval->fUnitValue.prefix[i] = VM_CENTI; continue;
+            case 'm': yylval->fUnitValue.prefix[i] = VM_MILLI; continue;
+            case 'u': yylval->fUnitValue.prefix[i] = VM_MICRO; continue;
+            case 'd':
+                if (yytext[pos+1] == 'a') {
+                    yylval->fUnitValue.prefix[i] = VM_DECA;
+                    ++pos;
+                } else {
+                    yylval->fUnitValue.prefix[i] = VM_DECI;
+                }
+                continue;
+            default:
+                yylval->fUnitValue.prefix[i] = VM_NO_PREFIX;
+                goto parseRealStdUnit;
+        }
+    }
+
+    parseRealStdUnit:
+
+    // parse standard measurement unit
+    switch (yytext[pos]) {
+        case 's': yylval->fUnitValue.unit = VM_SECOND;  break;
+        case 'H': yylval->fUnitValue.unit = VM_HERTZ;   break;
+        case 'B': yylval->fUnitValue.unit = VM_BEL;     break;
+        default:  yylval->fUnitValue.unit = VM_NO_UNIT; break;
+    }
+
+    return REAL_UNIT;
+}
 
 
  /* Preprocessor statement:  SET_CONDITION(name) */
@@ -234,7 +342,8 @@ ID       [a-zA-Z0-9_]+
 <PREPROC_BODY_EAT>.* { /* eat up code block filtered out by preprocessor */
     //printf("PREPROCESSOR EAT3 : {%s}\n", yytext);
     yyextra->addPreprocessorComment(yylloc->first_line, yylloc->last_line,
-                                    yylloc->first_column+1, yylloc->last_column+1);
+                                    yylloc->first_column+1, yylloc->last_column+1,
+                                    yylloc->first_byte, yylloc->length_bytes);
 }
 
 
@@ -256,6 +365,8 @@ ID       [a-zA-Z0-9_]+
 "not" return NOT;
 "else" return ELSE;
 "controller" return CONTROLLER;
+"rpn" return RPN;
+"nrpn" return NRPN;
 "case" return CASE;
 "select" return SELECT;
 "to" return TO;
@@ -263,22 +374,25 @@ ID       [a-zA-Z0-9_]+
 ">=" return GE;
 "const" return CONST_; // note: "CONST" is already defined for C/C++ compilers on Windows by default
 "polyphonic" return POLYPHONIC;
+"patch" return PATCH;
 "mod" return MOD;
 "function" return FUNCTION;
 "call" return CALL;
 "synchronized" return SYNCHRONIZED;
 
-[&,()[\]<>=*+#/-] {
+[&,!()[\]<>=*+#\/-] {
     return *yytext;
 }
 
-("$"|"@"|"%"){ID} {
+("$"|"@"|"%"|"~"|"?"){ID} {
     yylval->sValue = strdup(yytext);
+    yyextra->autoFreeAfterParse(yylval->sValue);
     return VARIABLE;
 }
 
 {ID} {
     yylval->sValue = strdup(yytext);
+    yyextra->autoFreeAfterParse(yylval->sValue);
     return IDENTIFIER;
 }
 

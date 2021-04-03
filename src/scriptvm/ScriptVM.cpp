@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 - 2017 Christian Schoenebeck
+ * Copyright (c) 2014 - 2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -67,7 +67,7 @@ namespace LinuxSampler {
     }
     #endif
 
-    static int _requiredMaxStackSizeFor(Statement* statement, int depth = 0) {
+    static vmint _requiredMaxStackSizeFor(Statement* statement, vmint depth = 0) {
         if (!statement) return 1;
 
         switch (statement->statementType()) {
@@ -84,9 +84,9 @@ namespace LinuxSampler {
                 printf("-> STMT_LIST\n");
                 #endif
                 Statements* stmts = (Statements*) statement;
-                int max = 0;
+                vmint max = 0;
                 for (int i = 0; stmts->statement(i); ++i) {
-                    int size = _requiredMaxStackSizeFor( stmts->statement(i), depth+1 );
+                    vmint size = _requiredMaxStackSizeFor( stmts->statement(i), depth+1 );
                     if (max < size) max = size;
                 }
                 return max + 1;
@@ -98,9 +98,9 @@ namespace LinuxSampler {
                 printf("-> STMT_BRANCH\n");
                 #endif
                 BranchStatement* branchStmt = (BranchStatement*) statement;
-                int max = 0;
+                vmint max = 0;
                 for (int i = 0; branchStmt->branch(i); ++i) {
-                    int size = _requiredMaxStackSizeFor( branchStmt->branch(i), depth+1 );
+                    vmint size = _requiredMaxStackSizeFor( branchStmt->branch(i), depth+1 );
                     if (max < size) max = size;
                 }
                 return max + 1;
@@ -129,23 +129,29 @@ namespace LinuxSampler {
                 else
                     return 1;
             }
+
+            case STMT_NOOP:
+                break; // no operation like the name suggests
         }
 
         return 1; // actually just to avoid compiler warning
     }
 
-    static int _requiredMaxStackSizeFor(EventHandlers* handlers) {
-        int max = 1;
+    static vmint _requiredMaxStackSizeFor(EventHandlers* handlers) {
+        vmint max = 1;
         for (int i = 0; i < handlers->size(); ++i) {
-            int size = _requiredMaxStackSizeFor(handlers->eventHandler(i));
+            vmint size = _requiredMaxStackSizeFor(handlers->eventHandler(i));
             if (max < size) max = size;
         }
         return max;
     }
 
-    ScriptVM::ScriptVM() : m_eventHandler(NULL), m_parserContext(NULL), m_autoSuspend(true) {
+    ScriptVM::ScriptVM() :
+        m_eventHandler(NULL), m_parserContext(NULL), m_autoSuspend(true),
+        m_acceptExitRes(false)
+    {
         m_fnMessage = new CoreVMFunction_message;
-        m_fnExit = new CoreVMFunction_exit;
+        m_fnExit = new CoreVMFunction_exit(this);
         m_fnWait = new CoreVMFunction_wait(this);
         m_fnAbs = new CoreVMFunction_abs;
         m_fnRandom = new CoreVMFunction_random;
@@ -157,11 +163,30 @@ namespace LinuxSampler {
         m_varPerfTimer = new CoreVMDynVar_NKSP_PERF_TIMER;
         m_fnShLeft = new CoreVMFunction_sh_left;
         m_fnShRight = new CoreVMFunction_sh_right;
+        m_fnMsb = new CoreVMFunction_msb;
+        m_fnLsb = new CoreVMFunction_lsb;
         m_fnMin = new CoreVMFunction_min;
         m_fnMax = new CoreVMFunction_max;
         m_fnArrayEqual = new CoreVMFunction_array_equal;
         m_fnSearch = new CoreVMFunction_search;
         m_fnSort = new CoreVMFunction_sort;
+        m_fnIntToReal = new CoreVMFunction_int_to_real;
+        m_fnRealToInt = new CoreVMFunction_real_to_int;
+        m_fnRound = new CoreVMFunction_round;
+        m_fnCeil = new CoreVMFunction_ceil;
+        m_fnFloor = new CoreVMFunction_floor;
+        m_fnSqrt = new CoreVMFunction_sqrt;
+        m_fnLog = new CoreVMFunction_log;
+        m_fnLog2 = new CoreVMFunction_log2;
+        m_fnLog10 = new CoreVMFunction_log10;
+        m_fnExp = new CoreVMFunction_exp;
+        m_fnPow = new CoreVMFunction_pow;
+        m_fnSin = new CoreVMFunction_sin;
+        m_fnCos = new CoreVMFunction_cos;
+        m_fnTan = new CoreVMFunction_tan;
+        m_fnAsin = new CoreVMFunction_asin;
+        m_fnAcos = new CoreVMFunction_acos;
+        m_fnAtan = new CoreVMFunction_atan;
     }
 
     ScriptVM::~ScriptVM() {
@@ -176,41 +201,132 @@ namespace LinuxSampler {
         delete m_fnInRange;
         delete m_fnShLeft;
         delete m_fnShRight;
+        delete m_fnMsb;
+        delete m_fnLsb;
         delete m_fnMin;
         delete m_fnMax;
         delete m_fnArrayEqual;
         delete m_fnSearch;
         delete m_fnSort;
+        delete m_fnIntToReal;
+        delete m_fnRealToInt;
+        delete m_fnRound;
+        delete m_fnCeil;
+        delete m_fnFloor;
+        delete m_fnSqrt;
+        delete m_fnLog;
+        delete m_fnLog2;
+        delete m_fnLog10;
+        delete m_fnExp;
+        delete m_fnPow;
+        delete m_fnSin;
+        delete m_fnCos;
+        delete m_fnTan;
+        delete m_fnAsin;
+        delete m_fnAcos;
+        delete m_fnAtan;
         delete m_varRealTimer;
         delete m_varPerfTimer;
     }
 
-    VMParserContext* ScriptVM::loadScript(const String& s) {
-        std::istringstream iss(s);
-        return loadScript(&iss);
+    VMParserContext* ScriptVM::loadScript(std::istream* is,
+                                          const std::map<String,String>& patchVars,
+                                          std::map<String,String>* patchVarsDef)
+    {
+        std::string s(std::istreambuf_iterator<char>(*is),{});
+        return loadScript(s, patchVars, patchVarsDef);
     }
-    
-    VMParserContext* ScriptVM::loadScript(std::istream* is) {
+
+    VMParserContext* ScriptVM::loadScript(const String& s,
+                                          const std::map<String,String>& patchVars,
+                                          std::map<String,String>* patchVarsDef)
+    {
+        ParserContext* context = (ParserContext*) loadScriptOnePass(s);
+        if (!context->vErrors.empty())
+            return context;
+
+        if (!context->patchVars.empty() && (!patchVars.empty() || patchVarsDef)) {
+            String s2 = s;
+
+            typedef std::pair<String,PatchVarBlock> Var;
+            std::map<int,Var> varsByPos;
+            for (const Var& var : context->patchVars) {
+                const String& name = var.first;
+                const PatchVarBlock& block = var.second;
+                const int pos =
+                    (block.exprBlock) ?
+                        block.exprBlock->firstByte :
+                        block.nameBlock.firstByte + block.nameBlock.lengthBytes;
+                varsByPos[pos] = var;
+                if (patchVarsDef) {
+                    (*patchVarsDef)[name] =
+                        (block.exprBlock) ?
+                            s.substr(pos, block.exprBlock->lengthBytes) : "";
+                }
+            }
+
+            if (patchVars.empty())
+                return context;
+
+            for (std::map<int,Var>::reverse_iterator it = varsByPos.rbegin();
+                 it != varsByPos.rend(); ++it)
+            {
+                const String name = it->second.first;
+                if (patchVars.find(name) != patchVars.end()) {
+                    const int pos = it->first;
+                    const PatchVarBlock& block = it->second.second;
+                    const int length =
+                        (block.exprBlock) ? block.exprBlock->lengthBytes : 0;
+                    String value;
+                    if (!length)
+                        value += " := ";
+                    value += patchVars.find(name)->second;
+                    s2.replace(pos, length, value);
+                }
+            }
+
+            if (s2 != s) {
+                delete context;
+                context = (ParserContext*) loadScriptOnePass(s2);
+            }
+        }
+
+        return context;
+    }
+
+    VMParserContext* ScriptVM::loadScriptOnePass(const String& s) {
         ParserContext* context = new ParserContext(this);
         //printf("parserCtx=0x%lx\n", (uint64_t)context);
+        std::istringstream iss(s);
 
         context->registerBuiltInConstIntVariables( builtInConstIntVariables() );
+        context->registerBuiltInConstRealVariables( builtInConstRealVariables() );
         context->registerBuiltInIntVariables( builtInIntVariables() );
         context->registerBuiltInIntArrayVariables( builtInIntArrayVariables() );
         context->registerBuiltInDynVariables( builtInDynamicVariables() );
 
-        context->createScanner(is);
+        context->createScanner(&iss);
 
         InstrScript_parse(context);
-        dmsg(2,("Allocating %ld bytes of global int VM memory.\n", long(context->globalIntVarCount * sizeof(int))));
-        dmsg(2,("Allocating %d of global VM string variables.\n", context->globalStrVarCount));
+        dmsg(2,("Allocating %" PRId64 " bytes of global int VM memory.\n", int64_t(context->globalIntVarCount * sizeof(vmint))));
+        dmsg(2,("Allocating %" PRId64 " bytes of global real VM memory.\n", int64_t(context->globalRealVarCount * sizeof(vmfloat))));
+        dmsg(2,("Allocating %" PRId64 " bytes of global unit factor VM memory.\n", int64_t(context->globalUnitFactorCount * sizeof(vmfloat))));
+        dmsg(2,("Allocating %" PRId64 " of global VM string variables.\n", (int64_t)context->globalStrVarCount));
         if (!context->globalIntMemory)
-            context->globalIntMemory = new ArrayList<int>();
+            context->globalIntMemory = new ArrayList<vmint>();
+        if (!context->globalRealMemory)
+            context->globalRealMemory = new ArrayList<vmfloat>();
+        if (!context->globalUnitFactorMemory)
+            context->globalUnitFactorMemory = new ArrayList<vmfloat>();
         if (!context->globalStrMemory)
             context->globalStrMemory = new ArrayList<String>();
         context->globalIntMemory->resize(context->globalIntVarCount);
-        memset(&((*context->globalIntMemory)[0]), 0, context->globalIntVarCount * sizeof(int));
-        
+        context->globalRealMemory->resize(context->globalRealVarCount);
+        context->globalUnitFactorMemory->resize(context->globalUnitFactorCount);
+        memset(&((*context->globalIntMemory)[0]), 0, context->globalIntVarCount * sizeof(vmint));
+        memset(&((*context->globalRealMemory)[0]), 0, context->globalRealVarCount * sizeof(vmfloat));
+        for (vmint i = 0; i < context->globalUnitFactorCount; ++i)
+            (*context->globalUnitFactorMemory)[i] = VM_NO_FACTOR;
         context->globalStrMemory->resize(context->globalStrVarCount);
 
         context->destroyScanner();
@@ -229,7 +345,11 @@ namespace LinuxSampler {
             return;
         }
         if (!ctx->globalIntMemory) {
-            std::cerr << "Internal error: no global memory assigend to script VM.\n";
+            std::cerr << "Internal error: no global integer memory assigend to script VM.\n";
+            return;
+        }
+        if (!ctx->globalRealMemory) {
+            std::cerr << "Internal error: no global real number memory assigend to script VM.\n";
             return;
         }
         ctx->handlers->dump();
@@ -244,14 +364,25 @@ namespace LinuxSampler {
                 _requiredMaxStackSizeFor(&*parserCtx->handlers);
         }
         execCtx->stack.resize(parserCtx->requiredMaxStackSize);
-        dmsg(2,("Created VM exec context with %ld bytes VM stack size.\n",
-                long(parserCtx->requiredMaxStackSize * sizeof(ExecContext::StackFrame))));
+        dmsg(2,("Created VM exec context with %" PRId64 " bytes VM stack size.\n",
+                int64_t(parserCtx->requiredMaxStackSize * sizeof(ExecContext::StackFrame))));
         //printf("execCtx=0x%lx\n", (uint64_t)execCtx);
-        const int polySize = parserCtx->polyphonicIntVarCount;
-        execCtx->polyphonicIntMemory.resize(polySize);
-        memset(&execCtx->polyphonicIntMemory[0], 0, polySize * sizeof(int));
+        const vmint polyIntSize = parserCtx->polyphonicIntVarCount;
+        execCtx->polyphonicIntMemory.resize(polyIntSize);
+        memset(&execCtx->polyphonicIntMemory[0], 0, polyIntSize * sizeof(vmint));
 
-        dmsg(2,("Allocated %ld bytes polyphonic memory.\n", long(polySize * sizeof(int))));
+        const vmint polyRealSize = parserCtx->polyphonicRealVarCount;
+        execCtx->polyphonicRealMemory.resize(polyRealSize);
+        memset(&execCtx->polyphonicRealMemory[0], 0, polyRealSize * sizeof(vmfloat));
+
+        const vmint polyFactorSize = parserCtx->polyphonicUnitFactorCount;
+        execCtx->polyphonicUnitFactorMemory.resize(polyFactorSize);
+        for (vmint i = 0; i < polyFactorSize; ++i)
+            execCtx->polyphonicUnitFactorMemory[i] = VM_NO_FACTOR;
+
+        dmsg(2,("Allocated %" PRId64 " bytes polyphonic int memory.\n", int64_t(polyIntSize * sizeof(vmint))));
+        dmsg(2,("Allocated %" PRId64 " bytes polyphonic real memory.\n", int64_t(polyRealSize * sizeof(vmfloat))));
+        dmsg(2,("Allocated %" PRId64 " bytes unit factor memory.\n", int64_t(polyFactorSize * sizeof(vmfloat))));
         return execCtx;
     }
 
@@ -266,7 +397,7 @@ namespace LinuxSampler {
             std::vector<SourceToken> tokens = scanner.tokens();
             std::vector<VMSourceToken> result;
             result.resize(tokens.size());
-            for (int i = 0; i < tokens.size(); ++i) {
+            for (vmint i = 0; i < tokens.size(); ++i) {
                 SourceToken* st = new SourceToken;
                 *st = tokens[i];
                 result[i] = VMSourceToken(st);
@@ -289,11 +420,32 @@ namespace LinuxSampler {
         else if (name == "in_range") return m_fnInRange;
         else if (name == "sh_left") return m_fnShLeft;
         else if (name == "sh_right") return m_fnShRight;
+        else if (name == "msb") return m_fnMsb;
+        else if (name == "lsb") return m_fnLsb;
         else if (name == "min") return m_fnMin;
         else if (name == "max") return m_fnMax;
         else if (name == "array_equal") return m_fnArrayEqual;
         else if (name == "search") return m_fnSearch;
         else if (name == "sort") return m_fnSort;
+        else if (name == "int_to_real") return m_fnIntToReal;
+        else if (name == "real") return m_fnIntToReal;
+        else if (name == "real_to_int") return m_fnRealToInt;
+        else if (name == "int") return m_fnRealToInt;
+        else if (name == "round") return m_fnRound;
+        else if (name == "ceil") return m_fnCeil;
+        else if (name == "floor") return m_fnFloor;
+        else if (name == "sqrt") return m_fnSqrt;
+        else if (name == "log") return m_fnLog;
+        else if (name == "log2") return m_fnLog2;
+        else if (name == "log10") return m_fnLog10;
+        else if (name == "exp") return m_fnExp;
+        else if (name == "pow") return m_fnPow;
+        else if (name == "sin") return m_fnSin;
+        else if (name == "cos") return m_fnCos;
+        else if (name == "tan") return m_fnTan;
+        else if (name == "asin") return m_fnAsin;
+        else if (name == "acos") return m_fnAcos;
+        else if (name == "atan") return m_fnAtan;
         return NULL;
     }
 
@@ -307,8 +459,8 @@ namespace LinuxSampler {
         return false;
     }
 
-    std::map<String,VMIntRelPtr*> ScriptVM::builtInIntVariables() {
-        return std::map<String,VMIntRelPtr*>();
+    std::map<String,VMIntPtr*> ScriptVM::builtInIntVariables() {
+        return std::map<String,VMIntPtr*>();
     }
 
     std::map<String,VMInt8Array*> ScriptVM::builtInIntArrayVariables() {
@@ -325,13 +477,24 @@ namespace LinuxSampler {
         return m;
     }
 
-    std::map<String,int> ScriptVM::builtInConstIntVariables() {
-        std::map<String,int> m;
+    std::map<String,vmint> ScriptVM::builtInConstIntVariables() {
+        std::map<String,vmint> m;
 
         m["$NI_CB_TYPE_INIT"] = VM_EVENT_HANDLER_INIT;
         m["$NI_CB_TYPE_NOTE"] = VM_EVENT_HANDLER_NOTE;
         m["$NI_CB_TYPE_RELEASE"] = VM_EVENT_HANDLER_RELEASE;
         m["$NI_CB_TYPE_CONTROLLER"] = VM_EVENT_HANDLER_CONTROLLER;
+        m["$NI_CB_TYPE_RPN"] = VM_EVENT_HANDLER_RPN;
+        m["$NI_CB_TYPE_NRPN"] = VM_EVENT_HANDLER_NRPN;
+
+        return m;
+    }
+
+    std::map<String,vmfloat> ScriptVM::builtInConstRealVariables() {
+        std::map<String,vmfloat> m;
+
+        m["~NI_MATH_PI"] = M_PI;
+        m["~NI_MATH_E"] = M_E;
 
         return m;
     }
@@ -357,10 +520,18 @@ namespace LinuxSampler {
         return m_autoSuspend;
     }
 
+    void ScriptVM::setExitResultEnabled(bool b) {
+        m_acceptExitRes = b;
+    }
+
+    bool ScriptVM::isExitResultEnabled() const {
+        return m_acceptExitRes;
+    }
+
     VMExecStatus_t ScriptVM::exec(VMParserContext* parserContext, VMExecContext* execContex, VMEventHandler* handler) {
         m_parserContext = dynamic_cast<ParserContext*>(parserContext);
         if (!m_parserContext) {
-            std::cerr << "No VM parser context provided. Did you load a script?.\n";
+            std::cerr << "No VM parser context provided. Did you load a script?\n";
             return VMExecStatus_t(VM_EXEC_NOT_RUNNING | VM_EXEC_ERROR);
         }
 
@@ -380,9 +551,10 @@ namespace LinuxSampler {
 
         ctx->status = VM_EXEC_RUNNING;
         ctx->instructionsCount = 0;
+        ctx->clearExitRes();
         StmtFlags_t& flags = ctx->flags;
-        int instructionsCounter = 0;
-        int synced = m_autoSuspend ? 0 : 1;
+        vmint instructionsCounter = 0;
+        vmint synced = m_autoSuspend ? 0 : 1;
 
         int& frameIdx = ctx->stackFrame;
         if (frameIdx < 0) { // start condition ...
@@ -438,7 +610,9 @@ namespace LinuxSampler {
                     if (frame.subindex < 0) ctx->popStack();
                     else {
                         BranchStatement* branchStmt = (BranchStatement*) frame.statement;
-                        frame.subindex = branchStmt->evalBranch();
+                        frame.subindex =
+                            (decltype(frame.subindex))
+                                branchStmt->evalBranch();
                         if (frame.subindex >= 0) {
                             ctx->pushStack(
                                 branchStmt->branch(frame.subindex)
@@ -485,6 +659,22 @@ namespace LinuxSampler {
                         --synced;
                     }
                     break;
+                }
+
+                case STMT_NOOP:
+                    break; // no operation like the name suggests
+            }
+
+            if (flags & STMT_RETURN_SIGNALLED) {
+                flags = StmtFlags_t(flags & ~STMT_RETURN_SIGNALLED);
+                for (; frameIdx >= 0; ctx->popStack()) {
+                    frame = ctx->stack[frameIdx];
+                    if (frame.statement->statementType() == STMT_SYNC) {
+                        --synced;
+                    } else if (dynamic_cast<Subroutine*>(frame.statement)) {
+                        ctx->popStack();
+                        break; // stop here
+                    }
                 }
             }
 

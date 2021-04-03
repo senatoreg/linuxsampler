@@ -13,11 +13,18 @@ liblinuxsamplercommonengine_la_SOURCES = \
 	Voice.h AbstractVoice.cpp AbstractVoice.h VoiceBase.h \
 	SignalUnit.h SignalUnit.cpp SignalUnitRack.h ModulatorGraph.cpp \
 	MidiKeyboardManager.h \
+	LFOAll.h \
 	LFOBase.h \
+	LFOPulse.h \
+	LFOSawIntMathNew.h \
+	LFOSawIntMathOld.h \
+	LFOSineBuiltinFn.h \
+	LFOSineNumericComplexNr.h \
+	LFOSquareIntMath.h \
+	LFOSquarePulse.h \
 	LFOTriangleDiHarmonic.h \
 	LFOTriangleIntAbsMath.h \
 	LFOTriangleIntMath.h \
-	SineLFO.h PulseLFO.h SawLFO.h \
 	Resampler.h \
 	AbstractInstrumentManager.h AbstractInstrumentManager.cpp \
 	InstrumentScriptVM.h InstrumentScriptVM.cpp \

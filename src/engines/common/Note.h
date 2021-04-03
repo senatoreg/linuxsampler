@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 - 2018 Christian Schoenebeck
+ * Copyright (c) 2016 - 2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -49,6 +49,76 @@ namespace LinuxSampler {
      */
     class NoteBase {
     public:
+        enum class ValueScope : unsigned char {
+            RELATIVE = (unsigned char) Event::ValueScope::RELATIVE,
+            FINAL_NORM = (unsigned char) Event::ValueScope::FINAL_NORM,
+            FINAL_NATIVE = (unsigned char) Event::ValueScope::FINAL_NATIVE,
+        };
+
+        /**
+         * General purpose note parameter value which might be both either in
+         * normalized value range (0..1) or in a native unit (i.e. seconds, Hz)
+         * depending on member variable @c Scope.
+         */
+        struct Param {
+            float      Value;
+            ValueScope Scope;
+
+            Param() {
+                Value = 1.f;
+                Scope = ValueScope::RELATIVE;
+            }
+
+            bool isFinal() const {
+                return Scope == ValueScope::FINAL_NORM ||
+                       Scope == ValueScope::FINAL_NATIVE;
+            }
+
+            template<typename T>
+            inline void applyTo(T& dst) {
+                if (isFinal())
+                    dst = Value;
+                else
+                    dst *= Value;
+            }
+        };
+
+        /**
+         * Parameter value being in normalized value range (0..1).
+         */
+        struct Norm {
+            float Value;
+            bool  Final;
+
+            Norm() {
+                Value = 1.f;
+                Final = false;
+            }
+
+            template<typename T>
+            inline void applyTo(T& dst) {
+                if (Final)
+                    dst = Value;
+                else
+                    dst *= Value;
+            }
+        };
+
+        /**
+         * Parameter value being in signed normalized value range (-1..+1).
+         */
+        struct SNorm {
+            float   Value;
+            bool    Final;
+            int64_t Sources; ///< Might be used for calculating an average pan value in differential way: amount of times the @c Value had been changed and shall be calculated relatively upon.
+
+            SNorm() {
+                Value = 0.f;
+                Final = false;
+                Sources = 0;
+            }
+        };
+
         int hostKey; ///< Key on which this is @c Note is allocated on. This is usually the note-on event's note number, however in case of a child note this will rather be the parent note's key instead!
         note_id_t parentNoteID; ///< If not null: unique ID of the parent note of this note (see comments of field @c pChildNotes).
         RTList<note_id_t>* pChildNotes; ///< Note ID list of "child" notes of this note. These are special notes that must be released once this note gets released.
@@ -57,29 +127,28 @@ namespace LinuxSampler {
         sched_time_t triggerSchedTime; ///< Engine's scheduler time when this note was launched.
         /// Optional synthesis parameters that might be overridden (by calling real-time instrument script functions like change_vol(), change_pitch(), etc.).
         struct  _Override {
-            float Volume;       ///< as linear amplification ratio (1.0 being neutral)
+            Norm  Volume;       ///< as linear amplification ratio (1.0 being neutral)
             float VolumeTime;   ///< Transition duration (in seconds) for changes to @c Volume.
-            float Pitch;        ///< as linear frequency ratio (1.0 being neutral)
+            Norm  Pitch;        ///< as linear frequency ratio (1.0 being neutral)
             float PitchTime;    ///< Transition duration (in seconds) for changes to @c Pitch.
-            float Pan;          ///< between -1.0 (most left) and +1.0 (most right) and 0.0 being neutral.
+            SNorm Pan;          ///< between -1.0 (most left) and +1.0 (most right) and 0.0 being neutral.
             float PanTime;      ///< Transition duration (in seconds) for changes to @c Pan.
-            int64_t PanSources; ///< Might be used for calculating an average pan value in differential way: amount of times the Pan value had been changed and shall be calculated relatively upon.
-            float Cutoff;       ///< between 0.0 and 1.0
-            float Resonance;    ///< between 0.0 and 1.0
-            float Attack;       ///< between 0.0 and 1.0
-            float Decay;        ///< between 0.0 and 1.0
-            float Sustain;      ///< between 0.0 and 1.0
-            float Release;      ///< between 0.0 and 1.0
-            float CutoffAttack; ///< between 0.0 and 1.0
-            float CutoffDecay;  ///< between 0.0 and 1.0
-            float CutoffSustain;///< between 0.0 and 1.0
-            float CutoffRelease;///< between 0.0 and 1.0
-            float AmpLFODepth;  ///< between 0.0 and 1.0
-            float AmpLFOFreq;   ///< between 0.0 and 1.0
-            float CutoffLFODepth;///< between 0.0 and 1.0
-            float CutoffLFOFreq; ///< between 0.0 and 1.0
-            float PitchLFODepth; ///< between 0.0 and 1.0
-            float PitchLFOFreq; ///< between 0.0 and 1.0
+            Param Cutoff;       ///< between 0.0 and 1.0
+            Norm  Resonance;    ///< between 0.0 and 1.0
+            Param Attack;       ///< between 0.0 and 1.0
+            Param Decay;        ///< between 0.0 and 1.0
+            Norm  Sustain;      ///< between 0.0 and 1.0
+            Param Release;      ///< between 0.0 and 1.0
+            Param CutoffAttack; ///< between 0.0 and 1.0
+            Param CutoffDecay;  ///< between 0.0 and 1.0
+            Norm  CutoffSustain;///< between 0.0 and 1.0
+            Param CutoffRelease;///< between 0.0 and 1.0
+            Norm  AmpLFODepth;  ///< between 0.0 and 1.0
+            Param AmpLFOFreq;   ///< between 0.0 and 1.0
+            Norm  CutoffLFODepth;///< between 0.0 and 1.0
+            Param CutoffLFOFreq; ///< between 0.0 and 1.0
+            Norm  PitchLFODepth; ///< between 0.0 and 1.0
+            Param PitchLFOFreq; ///< between 0.0 and 1.0
             fade_curve_t VolumeCurve;
             fade_curve_t PitchCurve;
             fade_curve_t PanCurve;
@@ -93,32 +162,149 @@ namespace LinuxSampler {
                 uint8_t DimBits; ///< Used only in conjunction with DimMask: Dimension bits that shall be selected.
             } Gig;
         } Format;
-        int userPar[4]; ///< Used only for real-time instrument script functions set_event_par() and get_event_par() to store script author's user specific data ($EVENT_PAR_0 to $EVENT_PAR_3).
+        vmint userPar[4]; ///< Used only for real-time instrument script functions set_event_par() and get_event_par() to store script author's user specific data ($EVENT_PAR_0 to $EVENT_PAR_3).
+
+        inline
+        void apply(RTList<Event>::Iterator& itEvent, Param _Override::*noteParam) {
+            const Event::ValueScope& scope = itEvent->Param.NoteSynthParam.Scope;
+            switch (scope) {
+                case Event::ValueScope::SELF_RELATIVE:
+                    if ((this->Override.*noteParam).Scope == ValueScope::FINAL_NATIVE)
+                        (this->Override.*noteParam) = Param();
+                    itEvent->Param.NoteSynthParam.AbsValue =
+                        ((this->Override.*noteParam).Value *= itEvent->Param.NoteSynthParam.Delta);
+                    (this->Override.*noteParam).Scope = ValueScope::RELATIVE;
+                    break;
+                case Event::ValueScope::RELATIVE:
+                    (this->Override.*noteParam).Value =
+                        itEvent->Param.NoteSynthParam.AbsValue =
+                            itEvent->Param.NoteSynthParam.Delta;
+                    (this->Override.*noteParam).Scope = ValueScope::RELATIVE;
+                    break;
+                case Event::ValueScope::FINAL_SELF_RELATIVE:
+                    if ((this->Override.*noteParam).Scope == ValueScope::FINAL_NATIVE)
+                        (this->Override.*noteParam) = Param();
+                    itEvent->Param.NoteSynthParam.AbsValue =
+                        ((this->Override.*noteParam).Value *= itEvent->Param.NoteSynthParam.Delta);
+                    (this->Override.*noteParam).Scope = ValueScope::FINAL_NORM;
+                    break;
+                case Event::ValueScope::FINAL_NORM:
+                    (this->Override.*noteParam).Value =
+                        itEvent->Param.NoteSynthParam.AbsValue =
+                            itEvent->Param.NoteSynthParam.Delta;
+                    (this->Override.*noteParam).Scope = ValueScope::FINAL_NORM;
+                    break;
+                case Event::ValueScope::FINAL_NATIVE:
+                    (this->Override.*noteParam).Value =
+                        itEvent->Param.NoteSynthParam.AbsValue =
+                            itEvent->Param.NoteSynthParam.Delta;
+                    (this->Override.*noteParam).Scope = ValueScope::FINAL_NATIVE;
+                    break;
+            }
+        }
+
+        inline
+        void apply(RTList<Event>::Iterator& itEvent, Norm _Override::*noteParam) {
+            const Event::ValueScope& scope = itEvent->Param.NoteSynthParam.Scope;
+            switch (scope) {
+                case Event::ValueScope::SELF_RELATIVE:
+                    itEvent->Param.NoteSynthParam.AbsValue =
+                        ((this->Override.*noteParam).Value *= itEvent->Param.NoteSynthParam.Delta);
+                    (this->Override.*noteParam).Final = false;
+                    break;
+                case Event::ValueScope::RELATIVE:
+                    (this->Override.*noteParam).Value =
+                        itEvent->Param.NoteSynthParam.AbsValue =
+                            itEvent->Param.NoteSynthParam.Delta;
+                    (this->Override.*noteParam).Final = false;
+                    break;
+                case Event::ValueScope::FINAL_SELF_RELATIVE:
+                    itEvent->Param.NoteSynthParam.AbsValue =
+                        ((this->Override.*noteParam).Value *= itEvent->Param.NoteSynthParam.Delta);
+                    (this->Override.*noteParam).Final = true;
+                    break;
+                case Event::ValueScope::FINAL_NORM:
+                    (this->Override.*noteParam).Value =
+                        itEvent->Param.NoteSynthParam.AbsValue =
+                            itEvent->Param.NoteSynthParam.Delta;
+                    (this->Override.*noteParam).Final = true;
+                    break;
+                case Event::ValueScope::FINAL_NATIVE:
+                    dmsg(1,("BUG: Attempt to assign a value in native unit to a Note parameter being in normalized value range only!\n"));
+                    break;
+            }
+        }
+
+        inline
+        void apply(RTList<Event>::Iterator& itEvent, SNorm _Override::*noteParam) {
+            const Event::ValueScope& scope = itEvent->Param.NoteSynthParam.Scope;
+            switch (scope) {
+                case Event::ValueScope::SELF_RELATIVE:
+                    itEvent->Param.NoteSynthParam.AbsValue =
+                        (this->Override.*noteParam).Value = RTMath::RelativeSummedAvg(
+                            (this->Override.*noteParam).Value,
+                            itEvent->Param.NoteSynthParam.Delta,
+                            ++(this->Override.*noteParam).Sources
+                        );
+                    (this->Override.*noteParam).Final = false;
+                    break;
+                case Event::ValueScope::RELATIVE:
+                    (this->Override.*noteParam).Value =
+                        itEvent->Param.NoteSynthParam.AbsValue =
+                            itEvent->Param.NoteSynthParam.Delta;
+                    (this->Override.*noteParam).Sources = 1;
+                    (this->Override.*noteParam).Final = false;
+                    break;
+                case Event::ValueScope::FINAL_SELF_RELATIVE:
+                    itEvent->Param.NoteSynthParam.AbsValue =
+                        (this->Override.*noteParam).Value = RTMath::RelativeSummedAvg(
+                            (this->Override.*noteParam).Value,
+                            itEvent->Param.NoteSynthParam.Delta,
+                            ++(this->Override.*noteParam).Sources
+                        );
+                    (this->Override.*noteParam).Final = true;
+                    break;
+                case Event::ValueScope::FINAL_NORM:
+                    (this->Override.*noteParam).Value =
+                        itEvent->Param.NoteSynthParam.AbsValue =
+                            itEvent->Param.NoteSynthParam.Delta;
+                    (this->Override.*noteParam).Sources = 1;
+                    (this->Override.*noteParam).Final = true;
+                    break;
+                case Event::ValueScope::FINAL_NATIVE:
+                    dmsg(1,("BUG: Attempt to assign a value in native unit to a Note parameter being in signed normalized value range only!\n"));
+                    break;
+            }
+        }
+
+        inline static ValueScope scopeBy_FinalUnit(bool bFinal, bool bNativeUnit) {
+            if (!bFinal) return ValueScope::RELATIVE;
+            return (bNativeUnit) ? ValueScope::FINAL_NATIVE : ValueScope::FINAL_NORM;
+        }
     protected:
         NoteBase() : hostKey(0), parentNoteID(0), pChildNotes(NULL) {
-            Override.Volume     = 1.f;
+            Override.Volume     = Norm();
             Override.VolumeTime = DEFAULT_NOTE_VOLUME_TIME_S;
-            Override.Pitch      = 1.f;
+            Override.Pitch      = Norm();
             Override.PitchTime  = DEFAULT_NOTE_PITCH_TIME_S;
-            Override.Pan        = 0.f;
+            Override.Pan        = SNorm();
             Override.PanTime    = DEFAULT_NOTE_PAN_TIME_S;
-            Override.PanSources = 0;
-            Override.Cutoff     = 1.f;
-            Override.Resonance  = 1.f;
-            Override.Attack     = 1.f;
-            Override.Decay      = 1.f;
-            Override.Sustain    = 1.f;
-            Override.Release    = 1.f;
-            Override.CutoffAttack  = 1.f;
-            Override.CutoffDecay   = 1.f;
-            Override.CutoffSustain = 1.f;
-            Override.CutoffRelease = 1.f;
-            Override.AmpLFODepth   = 1.f;
-            Override.AmpLFOFreq    = 1.f;
-            Override.CutoffLFODepth = 1.f;
-            Override.CutoffLFOFreq  = 1.f;
-            Override.PitchLFODepth = 1.f;
-            Override.PitchLFOFreq  = 1.f;
+            Override.Cutoff     = Param();
+            Override.Resonance  = Norm();
+            Override.Attack     = Param();
+            Override.Decay      = Param();
+            Override.Sustain    = Norm();
+            Override.Release    = Param();
+            Override.CutoffAttack  = Param();
+            Override.CutoffDecay   = Param();
+            Override.CutoffSustain = Norm();
+            Override.CutoffRelease = Param();
+            Override.AmpLFODepth   = Norm();
+            Override.AmpLFOFreq    = Param();
+            Override.CutoffLFODepth = Norm();
+            Override.CutoffLFOFreq  = Param();
+            Override.PitchLFODepth = Norm();
+            Override.PitchLFOFreq  = Param();
             Override.VolumeCurve = DEFAULT_FADE_CURVE;
             Override.PitchCurve  = DEFAULT_FADE_CURVE;
             Override.PanCurve    = DEFAULT_FADE_CURVE;
@@ -183,29 +369,28 @@ namespace LinuxSampler {
                 pChildNotes->clear();
             cause = Event();
             eventID = 0;
-            Override.Volume     = 1.f;
+            Override.Volume     = Norm();
             Override.VolumeTime = DEFAULT_NOTE_VOLUME_TIME_S;
-            Override.Pitch      = 1.f;
+            Override.Pitch      = Norm();
             Override.PitchTime  = DEFAULT_NOTE_PITCH_TIME_S;
-            Override.Pan        = 0.f;
+            Override.Pan        = SNorm();
             Override.PanTime    = DEFAULT_NOTE_PAN_TIME_S;
-            Override.PanSources = 0;
-            Override.Cutoff     = 1.f;
-            Override.Resonance  = 1.f;
-            Override.Attack     = 1.f;
-            Override.Decay      = 1.f;
-            Override.Sustain    = 1.f;
-            Override.Release    = 1.f;
-            Override.CutoffAttack  = 1.f;
-            Override.CutoffDecay   = 1.f;
-            Override.CutoffSustain = 1.f;
-            Override.CutoffRelease = 1.f;
-            Override.AmpLFODepth   = 1.f;
-            Override.AmpLFOFreq    = 1.f;
-            Override.CutoffLFODepth = 1.f;
-            Override.CutoffLFOFreq  = 1.f;
-            Override.PitchLFODepth = 1.f;
-            Override.PitchLFOFreq  = 1.f;
+            Override.Cutoff     = Param();
+            Override.Resonance  = Norm();
+            Override.Attack     = Param();
+            Override.Decay      = Param();
+            Override.Sustain    = Norm();
+            Override.Release    = Param();
+            Override.CutoffAttack  = Param();
+            Override.CutoffDecay   = Param();
+            Override.CutoffSustain = Norm();
+            Override.CutoffRelease = Param();
+            Override.AmpLFODepth   = Norm();
+            Override.AmpLFOFreq    = Param();
+            Override.CutoffLFODepth = Norm();
+            Override.CutoffLFOFreq  = Param();
+            Override.PitchLFODepth = Norm();
+            Override.PitchLFOFreq  = Param();
             Override.VolumeCurve = DEFAULT_FADE_CURVE;
             Override.PitchCurve  = DEFAULT_FADE_CURVE;
             Override.PanCurve    = DEFAULT_FADE_CURVE;

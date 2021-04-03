@@ -3,9 +3,9 @@
  *   LinuxSampler - modular, streaming capable sampler                     *
  *                                                                         *
  *   Copyright (C) 2003,2004 by Benno Senoner and Christian Schoenebeck    *
- *   Copyright (C) 2005-2008 Christian Schoenebeck                         *
- *   Copyright (C) 2009-2012 Christian Schoenebeck and Grigor Iliev        *
- *   Copyright (C) 2012-2017 Christian Schoenebeck and Andreas Persson     *
+ *   Copyright (C) 2005-2021 Christian Schoenebeck                         *
+ *   Copyright (C) 2009-2012 Grigor Iliev                                  *
+ *   Copyright (C) 2012-2017 Andreas Persson                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -250,7 +250,9 @@ namespace LinuxSampler {
                 return 0;
             }
 
-            virtual int MaxVoices() OVERRIDE { return pVoicePool->poolSize(); }
+            virtual int MaxVoices() OVERRIDE {
+                return (int) pVoicePool->poolSize();
+            }
 
             virtual void SetMaxVoices(int iVoices) throw (Exception) OVERRIDE {
                 if (iVoices < 1)
@@ -824,6 +826,8 @@ namespace LinuxSampler {
                                 //TODO: ...
                                 break;
 
+                            case Event::type_rpn: // rpn handled in ProcessHardcodedControllers() instead ATM
+                            case Event::type_nrpn: // nrpn handled in ProcessHardcodedControllers() instead ATM
                             case Event::type_cancel_release_key:
                             case Event::type_release_key:
                             case Event::type_release_note:
@@ -885,6 +889,7 @@ namespace LinuxSampler {
                     RTList<Event>::Iterator itEvent = pChannel->pEvents->first();
                     RTList<Event>::Iterator end     = pChannel->pEvents->end();
                     for (; itEvent != end; ++itEvent) {
+                        bool bIsCC = false; // just for resetting RPN/NRPN below
                         switch (itEvent->Type) {
                             case Event::type_note_on:
                                 dmsg(5,("Engine: Note on received\n"));
@@ -909,6 +914,17 @@ namespace LinuxSampler {
                             case Event::type_control_change:
                                 dmsg(5,("Engine: MIDI CC received\n"));
                                 ProcessControlChange((EngineChannel*)itEvent->pEngineChannel, itEvent);
+                                bIsCC = true;
+                                break;
+                            case Event::type_rpn: // this can only be reached here by an instrument script having called set_rpn()
+                                dmsg(5,("Engine: MIDI RPN received\n"));
+                                ProcessHardcodedRpn((EngineChannel*)itEvent->pEngineChannel, itEvent);
+                                bIsCC = true;
+                                break;
+                            case Event::type_nrpn: // this can only be reached here by an instrument script having called set_nrpn()
+                                dmsg(5,("Engine: MIDI NRPN received\n"));
+                                ProcessHardcodedNrpn((EngineChannel*)itEvent->pEngineChannel, itEvent);
+                                bIsCC = true;
                                 break;
                             case Event::type_channel_pressure:
                                 dmsg(5,("Engine: MIDI Chan. Pressure received\n"));
@@ -933,6 +949,14 @@ namespace LinuxSampler {
                             case Event::type_release_key:
                             case Event::type_release_note:
                                 break; // noop
+                        }
+                        // reset cached RPN/NRPN parameter number and data in
+                        // case this event was not a control change event
+                        if (!bIsCC) {
+                            if (pChannel->GetMidiRpnParameter() >= 0)
+                                pChannel->ResetMidiRpnParameter();
+                            if (pChannel->GetMidiNrpnParameter() >= 0)
+                                pChannel->ResetMidiNrpnParameter();
                         }
                     }
                 }
@@ -982,19 +1006,74 @@ namespace LinuxSampler {
                 if (pEventHandler == pChannel->pScript->handlerRelease &&
                     pChannel->pScript->handlerNote &&
                     pChannel->pScript->handlerNote->isPolyphonic() &&
-                    pChannel->pScript->handlerRelease->isPolyphonic() &&
-                    !pChannel->pScript->pKeyEvents[key]->isEmpty())
+                    pChannel->pScript->handlerRelease->isPolyphonic())
                 {
                     // polyphonic variable data is used/passed from "note" to
-                    // "release" script callback, so we have to recycle the
-                    // original "note on" script event(s)
+                    // "release" script callback; first assume the "note" script
+                    // callback already finished execution and waits for being
+                    // recycled for the "release" script handler ...
                     RTList<ScriptEvent>::Iterator it  = pChannel->pScript->pKeyEvents[key]->first();
                     RTList<ScriptEvent>::Iterator end = pChannel->pScript->pKeyEvents[key]->end();
                     for (; it != end; ++it) {
+                        // Despite the loop, in fact we're just picking and
+                        // running EXACTLY ONE script event here and then leave
+                        // the loop immediately.
+                        if (it->handlerType != VM_EVENT_HANDLER_NOTE)
+                            continue;
+                        // Skip "note" script callbacks which have already been
+                        // picked (in this loop) for a "release" callback
+                        // before. This ensures that a "note" script callback is
+                        // really just used once for a "release" callback.
+                        if (it->releaseMatched)
+                            continue;
+                        it->releaseMatched = true;
+                        // Now recycle the picked old "note" script callback for
+                        // the "release" script callback.
                         ProcessScriptEvent(
                             pChannel, itEvent, pEventHandler, it
                         );
+                        // We don't want to run the "release" handler of more
+                        // than one (previously being "note" handler) script
+                        // event here, because the precise relationship between
+                        // exactly one "note" handler instance and one "release"
+                        // handler instance must always be preserved to prevent
+                        // misbehaviours with scripts (e.g. a script author
+                        // might increment a script variable in the "note"
+                        // handler and decrement the variable in the "release"
+                        // handler to count the currently pressed down keys).
+                        return;
                     }
+                    // If we're here then the original "note" script callback
+                    // has not finished execution yet (i.e. it is currently
+                    // suspended). This requires a more expensive solution:
+                    // search on the list of all yet active script callbacks.
+                    it  = pChannel->pScript->pEvents->first();
+                    end = pChannel->pScript->pEvents->end();
+                    for (; it != end; ++it) {
+                        if (it->handlerType != VM_EVENT_HANDLER_NOTE)
+                            continue;
+                        if (it->cause.Param.Note.Key != itEvent->Param.Note.Key)
+                            continue;
+                        if (it->releaseMatched)
+                            continue;
+                        it->releaseMatched = true;
+                        // As the original "note" callback is still running, we
+                        // cannot recycle it, instead we spawn a completely new
+                        // script handler and just copy the "note" handler's
+                        // polyphonic data.
+                        RTList<ScriptEvent>::Iterator itScriptEvent =
+                            pChannel->pScript->pEvents->allocAppend();
+                        itScriptEvent->execCtx->copyPolyphonicDataFrom(it->execCtx);
+                        // Now run the new "release" handler with the polyphonic
+                        // data copied from the original "note" handler.
+                        ProcessScriptEvent(
+                            pChannel, itEvent, pEventHandler, itScriptEvent
+                        );
+                        // Done. Matched exactly one note <-> release handler.
+                        return;
+                    }
+                    // This should never happen. Otherwise it's a bug.
+                    dmsg(0,("[ScriptVM] WARNING: No matching previous \"note\" event handler found for polyphonic \"release\" event handler!\n"));
                 } else {
                     // no polyphonic data is used/passed from "note" to
                     // "release" script callback, so just use a new fresh
@@ -1041,6 +1120,7 @@ namespace LinuxSampler {
                 itScriptEvent->currentHandler = 0;
                 itScriptEvent->executionSlices = 0;
                 itScriptEvent->ignoreAllWaitCalls = false;
+                itScriptEvent->releaseMatched = false;
                 itScriptEvent->handlerType = pEventHandler->eventHandlerType();
                 itScriptEvent->parentHandlerID = 0;
                 itScriptEvent->childHandlerID[0] = 0;
@@ -1180,7 +1260,7 @@ namespace LinuxSampler {
                 // steal oldest voice on the oldest key from any other engine channel
                 // (the smaller engine channel number, the higher priority)
                 EngineChannelBase<V, R, I>*  pSelectedChannel;
-                int                          iChannelIndex;
+                ssize_t                      iChannelIndex;
                 VoiceIterator                itSelectedVoice;
 
                 #if CONFIG_DEVMODE
@@ -1332,6 +1412,7 @@ namespace LinuxSampler {
                             itScriptEvent->currentHandler = 0;
                             itScriptEvent->executionSlices = 0;
                             itScriptEvent->ignoreAllWaitCalls = false;
+                            itScriptEvent->releaseMatched = false; // not relevant for init handler actually
                             itScriptEvent->handlerType = VM_EVENT_HANDLER_INIT;
                             itScriptEvent->parentHandlerID = 0;
                             itScriptEvent->childHandlerID[0] = 0;
@@ -1479,69 +1560,99 @@ namespace LinuxSampler {
                 EngineChannelBase<V, R, I>* pChannel =
                     static_cast<EngineChannelBase<V, R, I>*>(pEngineChannel);
 
+                // will be set to true if this CC event has anything to do with RPN/NRPN
+                bool bIsRpn = false, bIsNrpn = false;
+
                 switch (itControlChangeEvent->Param.CC.Controller) {
                     case 5: { // portamento time
                         pChannel->PortamentoTime = (float) itControlChangeEvent->Param.CC.Value / 127.0f * (float) CONFIG_PORTAMENTO_TIME_MAX + (float) CONFIG_PORTAMENTO_TIME_MIN;
                         break;
                     }
-                    case 6: { // data entry (currently only used for RPN and NRPN controllers)
-                        //dmsg(1,("DATA ENTRY %d\n", itControlChangeEvent->Param.CC.Value));
-                        if (pChannel->GetMidiRpnController() >= 0) { // RPN controller number was sent previously ...
-                            dmsg(4,("Guess it's an RPN ...\n"));
-                            if (pChannel->GetMidiRpnController() == 2) { // coarse tuning in half tones
-                                int transpose = (int) itControlChangeEvent->Param.CC.Value - 64;
-                                // limit to +- two octaves for now
-                                transpose = RTMath::Min(transpose,  24);
-                                transpose = RTMath::Max(transpose, -24);
-                                pChannel->GlobalTranspose = transpose;
-                                // workaround, so we won't have hanging notes
-                                pChannel->ReleaseAllVoices(itControlChangeEvent);
+                    case 6: { // data entry (MSB)
+                        //dmsg(1,("DATA ENTRY MSB %d\n", itControlChangeEvent->Param.CC.Value));
+                        if (pChannel->GetMidiRpnParameter() >= 0) { // RPN parameter number was sent previously ...
+                            pChannel->SetMidiRpnDataMsb(
+                                itControlChangeEvent->Param.CC.Value
+                            );
+                            bIsRpn = true;
+
+                            // look-ahead: if next MIDI event is data entry LSB,
+                            // then skip this event here for now (to avoid double
+                            // handling of what's supposed to be one RPN event)
+                            if (isNextEventCCNr(itControlChangeEvent, 38))
+                                break;
+
+                            int ch = itControlChangeEvent->Param.CC.Channel;
+                            int param = pChannel->GetMidiRpnParameter();
+                            int value = pChannel->GetMidiRpnData();
+
+                            // transform event type: CC event -> RPN event
+                            itControlChangeEvent->Type = Event::type_rpn;
+                            itControlChangeEvent->Param.RPN.Channel = ch;
+                            itControlChangeEvent->Param.RPN.Parameter = param;
+                            itControlChangeEvent->Param.RPN.Value = value;
+
+                            // if there's a RPN script handler, run it ...
+                            if (pChannel->pScript &&
+                                pChannel->pScript->handlerRpn)
+                            {
+                                const event_id_t eventID =
+                                    pEventPool->getID(itControlChangeEvent);
+                                // run the RPN script handler
+                                ProcessEventByScript(
+                                    pChannel, itControlChangeEvent,
+                                    pChannel->pScript->handlerRpn
+                                );
+                                // if RPN event was dropped by script, abort
+                                // here to avoid hard coded RPN processing below
+                                if (!pEventPool->fromID(eventID))
+                                    break;
                             }
-                            // to prevent other MIDI CC #6 messages to be misenterpreted as RPN controller data
-                            pChannel->ResetMidiRpnController();
-                        } else if (pChannel->GetMidiNrpnController() >= 0) { // NRPN controller number was sent previously ...
-                            dmsg(4,("Guess it's an NRPN ...\n"));
-                            const int NrpnCtrlMSB = pChannel->GetMidiNrpnController() >> 8; 
-                            const int NrpnCtrlLSB = pChannel->GetMidiNrpnController() & 0xff;
-                            dmsg(4,("NRPN MSB=%d LSB=%d Data=%d\n", NrpnCtrlMSB, NrpnCtrlLSB, itControlChangeEvent->Param.CC.Value));
-                            switch (NrpnCtrlMSB) {
-                                case 0x1a: { // volume level of note (Roland GS NRPN)
-                                    const uint note = NrpnCtrlLSB;
-                                    const uint vol  = itControlChangeEvent->Param.CC.Value;
-                                    dmsg(4,("Note Volume NRPN received (note=%d,vol=%d).\n", note, vol));
-                                    if (note < 128 && vol < 128)
-                                        pChannel->pMIDIKeyInfo[note].Volume = VolumeCurve[vol];
+
+                            // do the actual (hard-coded) RPN value change processing
+                            ProcessHardcodedRpn(pEngineChannel, itControlChangeEvent);
+
+                        } else if (pChannel->GetMidiNrpnParameter() >= 0) { // NRPN parameter number was sent previously ...
+                            pChannel->SetMidiNrpnDataMsb(
+                                itControlChangeEvent->Param.CC.Value
+                            );
+                            bIsNrpn = true;
+
+                            // look-ahead: if next MIDI event is data entry LSB,
+                            // then skip this event here for now (to avoid double
+                            // handling of what's supposed to be one NRPN event)
+                            if (isNextEventCCNr(itControlChangeEvent, 38))
+                                break;
+
+                            int ch = itControlChangeEvent->Param.CC.Channel;
+                            int param = pChannel->GetMidiNrpnParameter();
+                            int value = pChannel->GetMidiNrpnData();
+
+                            // transform event type: CC event -> NRPN event
+                            itControlChangeEvent->Type = Event::type_nrpn;
+                            itControlChangeEvent->Param.NRPN.Channel = ch;
+                            itControlChangeEvent->Param.NRPN.Parameter = param;
+                            itControlChangeEvent->Param.NRPN.Value = value;
+
+                            // if there's a NRPN script handler, run it ...
+                            if (pChannel->pScript &&
+                                pChannel->pScript->handlerNrpn)
+                            {
+                                const event_id_t eventID =
+                                    pEventPool->getID(itControlChangeEvent);
+                                // run the NRPN script handler
+                                ProcessEventByScript(
+                                    pChannel, itControlChangeEvent,
+                                    pChannel->pScript->handlerNrpn
+                                );
+                                // if NRPN event was dropped by script, abort
+                                // here to avoid hard coded NRPN processing below
+                                if (!pEventPool->fromID(eventID))
                                     break;
-                                }
-                                case 0x1c: { // panpot of note (Roland GS NRPN)
-                                    const uint note = NrpnCtrlLSB;
-                                    const uint pan  = itControlChangeEvent->Param.CC.Value;
-                                    dmsg(4,("Note Pan NRPN received (note=%d,pan=%d).\n", note, pan));
-                                    if (note < 128 && pan < 128) {
-                                        pChannel->pMIDIKeyInfo[note].PanLeft  = PanCurve[128 - pan];
-                                        pChannel->pMIDIKeyInfo[note].PanRight = PanCurve[pan];
-                                    }
-                                    break;
-                                }
-                                case 0x1d: { // reverb send of note (Roland GS NRPN)
-                                    const uint note = NrpnCtrlLSB;
-                                    const float reverb = float(itControlChangeEvent->Param.CC.Value) / 127.0f;
-                                    dmsg(4,("Note Reverb Send NRPN received (note=%d,send=%f).\n", note, reverb));
-                                    if (note < 128)
-                                        pChannel->pMIDIKeyInfo[note].ReverbSend = reverb;
-                                    break;
-                                }
-                                case 0x1e: { // chorus send of note (Roland GS NRPN)
-                                    const uint note = NrpnCtrlLSB;
-                                    const float chorus = float(itControlChangeEvent->Param.CC.Value) / 127.0f;
-                                    dmsg(4,("Note Chorus Send NRPN received (note=%d,send=%f).\n", note, chorus));
-                                    if (note < 128)
-                                        pChannel->pMIDIKeyInfo[note].ChorusSend = chorus;
-                                    break;
-                                }
                             }
-                            // to prevent other MIDI CC #6 messages to be misenterpreted as NRPN controller data
-                            pChannel->ResetMidiNrpnController();
+
+                            // do the actual (hard-coded) NRPN value change processing
+                            ProcessHardcodedNrpn(pEngineChannel, itControlChangeEvent);
                         }
                         break;
                     }
@@ -1554,6 +1665,82 @@ namespace LinuxSampler {
                     case 10: { // panpot
                         //TODO: not sample accurate yet
                         pChannel->iLastPanRequest = itControlChangeEvent->Param.CC.Value;
+                        break;
+                    }
+                    case 38: { // data entry (LSB)
+                        //dmsg(1,("DATA ENTRY LSB %d\n", itControlChangeEvent->Param.CC.Value));
+                        if (pChannel->GetMidiRpnParameter() >= 0) { // RPN parameter number was sent previously ...
+                            pChannel->SetMidiRpnDataLsb(
+                                itControlChangeEvent->Param.CC.Value
+                            );
+                            bIsRpn = true;
+
+                            int ch = itControlChangeEvent->Param.CC.Channel;
+                            int param = pChannel->GetMidiRpnParameter();
+                            int value = pChannel->GetMidiRpnData();
+
+                            // transform event type: CC event -> RPN event
+                            itControlChangeEvent->Type = Event::type_rpn;
+                            itControlChangeEvent->Param.RPN.Channel = ch;
+                            itControlChangeEvent->Param.RPN.Parameter = param;
+                            itControlChangeEvent->Param.RPN.Value = value;
+
+                            // if there's a RPN script handler, run it ...
+                            if (pChannel->pScript &&
+                                pChannel->pScript->handlerRpn)
+                            {
+                                const event_id_t eventID =
+                                    pEventPool->getID(itControlChangeEvent);
+                                // run the RPN script handler
+                                ProcessEventByScript(
+                                    pChannel, itControlChangeEvent,
+                                    pChannel->pScript->handlerRpn
+                                );
+                                // if RPN event was dropped by script, abort
+                                // here to avoid hard coded RPN processing below
+                                if (!pEventPool->fromID(eventID))
+                                    break;
+                            }
+
+                            // do the actual (hard-coded) RPN value change processing
+                            ProcessHardcodedRpn(pEngineChannel, itControlChangeEvent);
+
+                        } else if (pChannel->GetMidiNrpnParameter() >= 0) { // NRPN parameter number was sent previously ...
+                            pChannel->SetMidiNrpnDataLsb(
+                                itControlChangeEvent->Param.CC.Value
+                            );
+                            bIsNrpn = true;
+
+                            int ch = itControlChangeEvent->Param.CC.Channel;
+                            int param = pChannel->GetMidiNrpnParameter();
+                            int value = pChannel->GetMidiNrpnData();
+
+                            // transform event type: CC event -> NRPN event
+                            itControlChangeEvent->Type = Event::type_nrpn;
+                            itControlChangeEvent->Param.NRPN.Channel = ch;
+                            itControlChangeEvent->Param.NRPN.Parameter = param;
+                            itControlChangeEvent->Param.NRPN.Value = value;
+
+                            // if there's a NRPN script handler, run it ...
+                            if (pChannel->pScript &&
+                                pChannel->pScript->handlerNrpn)
+                            {
+                                const event_id_t eventID =
+                                    pEventPool->getID(itControlChangeEvent);
+                                // run the NRPN script handler
+                                ProcessEventByScript(
+                                    pChannel, itControlChangeEvent,
+                                    pChannel->pScript->handlerNrpn
+                                );
+                                // if NRPN event was dropped by script, abort
+                                // here to avoid hard coded NRPN processing below
+                                if (!pEventPool->fromID(eventID))
+                                    break;
+                            }
+
+                            // do the actual (hard-coded) NRPN value change processing
+                            ProcessHardcodedNrpn(pEngineChannel, itControlChangeEvent);
+                        }
                         break;
                     }
                     case 64: { // sustain
@@ -1629,24 +1816,180 @@ namespace LinuxSampler {
                         }
                         break;
                     }
-                    case 98: { // NRPN controller LSB
+                    case 96: { // data increment (data entry +1)
+                        //dmsg(1,("DATA INC\n"));
+                        if (pChannel->GetMidiRpnParameter() >= 0) { // RPN parameter number was sent previously ...
+                            pChannel->SetMidiRpnData(
+                                pChannel->GetMidiRpnData() + 1
+                            );
+                            bIsRpn = true;
+
+                            int ch = itControlChangeEvent->Param.CC.Channel;
+                            int param = pChannel->GetMidiRpnParameter();
+                            int value = pChannel->GetMidiRpnData();
+
+                            // transform event type: CC event -> RPN event
+                            itControlChangeEvent->Type = Event::type_rpn;
+                            itControlChangeEvent->Param.RPN.Channel = ch;
+                            itControlChangeEvent->Param.RPN.Parameter = param;
+                            itControlChangeEvent->Param.RPN.Value = value;
+
+                            // if there's a RPN script handler, run it ...
+                            if (pChannel->pScript &&
+                                pChannel->pScript->handlerRpn)
+                            {
+                                const event_id_t eventID =
+                                    pEventPool->getID(itControlChangeEvent);
+                                // run the RPN script handler
+                                ProcessEventByScript(
+                                    pChannel, itControlChangeEvent,
+                                    pChannel->pScript->handlerRpn
+                                );
+                                // if RPN event was dropped by script, abort
+                                // here to avoid hard coded RPN processing below
+                                if (!pEventPool->fromID(eventID))
+                                    break;
+                            }
+
+                            // do the actual (hard-coded) RPN value change processing
+                            ProcessHardcodedRpn(pEngineChannel, itControlChangeEvent);
+
+                        } else if (pChannel->GetMidiNrpnParameter() >= 0) { // NRPN parameter number was sent previously ...
+                            pChannel->SetMidiNrpnData(
+                                pChannel->GetMidiNrpnData() + 1
+                            );
+                            bIsNrpn = true;
+
+                            int ch = itControlChangeEvent->Param.CC.Channel;
+                            int param = pChannel->GetMidiNrpnParameter();
+                            int value = pChannel->GetMidiNrpnData();
+
+                            // transform event type: CC event -> NRPN event
+                            itControlChangeEvent->Type = Event::type_nrpn;
+                            itControlChangeEvent->Param.NRPN.Channel = ch;
+                            itControlChangeEvent->Param.NRPN.Parameter = param;
+                            itControlChangeEvent->Param.NRPN.Value = value;
+
+                            // if there's a NRPN script handler, run it ...
+                            if (pChannel->pScript &&
+                                pChannel->pScript->handlerNrpn)
+                            {
+                                const event_id_t eventID =
+                                    pEventPool->getID(itControlChangeEvent);
+                                // run the NRPN script handler
+                                ProcessEventByScript(
+                                    pChannel, itControlChangeEvent,
+                                    pChannel->pScript->handlerNrpn
+                                );
+                                // if NRPN event was dropped by script, abort
+                                // here to avoid hard coded NRPN processing below
+                                if (!pEventPool->fromID(eventID))
+                                    break;
+                            }
+
+                            // do the actual (hard-coded) NRPN value change processing
+                            ProcessHardcodedNrpn(pEngineChannel, itControlChangeEvent);
+                        }
+                        break;
+                    }
+                    case 97: { // data decrement (data entry -1)
+                        //dmsg(1,("DATA DEC\n"));
+                        if (pChannel->GetMidiRpnParameter() >= 0) { // RPN parameter number was sent previously ...
+                            pChannel->SetMidiRpnData(
+                                pChannel->GetMidiRpnData() - 1
+                            );
+                            bIsRpn = true;
+
+                            int ch = itControlChangeEvent->Param.CC.Channel;
+                            int param = pChannel->GetMidiRpnParameter();
+                            int value = pChannel->GetMidiRpnData();
+
+                            // transform event type: CC event -> RPN event
+                            itControlChangeEvent->Type = Event::type_rpn;
+                            itControlChangeEvent->Param.RPN.Channel = ch;
+                            itControlChangeEvent->Param.RPN.Parameter = param;
+                            itControlChangeEvent->Param.RPN.Value = value;
+
+                            // if there's a RPN script handler, run it ...
+                            if (pChannel->pScript &&
+                                pChannel->pScript->handlerRpn)
+                            {
+                                const event_id_t eventID =
+                                    pEventPool->getID(itControlChangeEvent);
+                                // run the RPN script handler
+                                ProcessEventByScript(
+                                    pChannel, itControlChangeEvent,
+                                    pChannel->pScript->handlerRpn
+                                );
+                                // if RPN event was dropped by script, abort
+                                // here to avoid hard coded RPN processing below
+                                if (!pEventPool->fromID(eventID))
+                                    break;
+                            }
+
+                            // do the actual (hard-coded) RPN value change processing
+                            ProcessHardcodedRpn(pEngineChannel, itControlChangeEvent);
+
+                        } else if (pChannel->GetMidiNrpnParameter() >= 0) { // NRPN parameter number was sent previously ...
+                            pChannel->SetMidiNrpnData(
+                                pChannel->GetMidiNrpnData() - 1
+                            );
+                            bIsNrpn = true;
+
+                            int ch = itControlChangeEvent->Param.CC.Channel;
+                            int param = pChannel->GetMidiNrpnParameter();
+                            int value = pChannel->GetMidiNrpnData();
+
+                            // transform event type: CC event -> NRPN event
+                            itControlChangeEvent->Type = Event::type_nrpn;
+                            itControlChangeEvent->Param.NRPN.Channel = ch;
+                            itControlChangeEvent->Param.NRPN.Parameter = param;
+                            itControlChangeEvent->Param.NRPN.Value = value;
+
+                            // if there's a NRPN script handler, run it ...
+                            if (pChannel->pScript &&
+                                pChannel->pScript->handlerNrpn)
+                            {
+                                const event_id_t eventID =
+                                    pEventPool->getID(itControlChangeEvent);
+                                // run the NRPN script handler
+                                ProcessEventByScript(
+                                    pChannel, itControlChangeEvent,
+                                    pChannel->pScript->handlerNrpn
+                                );
+                                // if NRPN event was dropped by script, abort
+                                // here to avoid hard coded NRPN processing below
+                                if (!pEventPool->fromID(eventID))
+                                    break;
+                            }
+
+                            // do the actual (hard-coded) NRPN value change processing
+                            ProcessHardcodedNrpn(pEngineChannel, itControlChangeEvent);
+                        }
+                        break;
+                    }
+                    case 98: { // NRPN parameter LSB
                         dmsg(4,("NRPN LSB %d\n", itControlChangeEvent->Param.CC.Value));
-                        pEngineChannel->SetMidiNrpnControllerLsb(itControlChangeEvent->Param.CC.Value);
+                        bIsNrpn = true;
+                        pEngineChannel->SetMidiNrpnParameterLsb(itControlChangeEvent->Param.CC.Value);
                         break;
                     }
-                    case 99: { // NRPN controller MSB
+                    case 99: { // NRPN parameter MSB
                         dmsg(4,("NRPN MSB %d\n", itControlChangeEvent->Param.CC.Value));
-                        pEngineChannel->SetMidiNrpnControllerMsb(itControlChangeEvent->Param.CC.Value);
+                        bIsNrpn = true;
+                        pEngineChannel->SetMidiNrpnParameterMsb(itControlChangeEvent->Param.CC.Value);
                         break;
                     }
-                    case 100: { // RPN controller LSB
+                    case 100: { // RPN parameter LSB
                         dmsg(4,("RPN LSB %d\n", itControlChangeEvent->Param.CC.Value));
-                        pEngineChannel->SetMidiRpnControllerLsb(itControlChangeEvent->Param.CC.Value);
+                        bIsRpn = true;
+                        pEngineChannel->SetMidiRpnParameterLsb(itControlChangeEvent->Param.CC.Value);
                         break;
                     }
-                    case 101: { // RPN controller MSB
+                    case 101: { // RPN parameter MSB
                         dmsg(4,("RPN MSB %d\n", itControlChangeEvent->Param.CC.Value));
-                        pEngineChannel->SetMidiRpnControllerMsb(itControlChangeEvent->Param.CC.Value);
+                        bIsRpn = true;
+                        pEngineChannel->SetMidiRpnParameterMsb(itControlChangeEvent->Param.CC.Value);
                         break;
                     }
 
@@ -1677,6 +2020,98 @@ namespace LinuxSampler {
                         if (pChannel->SoloMode)
                             KillAllVoices(pEngineChannel, itControlChangeEvent);
                         pChannel->SoloMode = false;
+                        break;
+                    }
+                }
+
+                // reset cached RPN/NRPN parameter number and data in case this
+                // CC event had nothing to do with RPN/NRPN
+                if (!bIsRpn && pChannel->GetMidiRpnParameter() >= 0)
+                    pChannel->ResetMidiRpnParameter();
+                if (!bIsNrpn && pChannel->GetMidiNrpnParameter() >= 0)
+                    pChannel->ResetMidiNrpnParameter();
+            }
+
+            /**
+             * Process MIDI RPN events with hard coded behavior.
+             *
+             * @param pEngineChannel - engine channel on which the MIDI RPN
+             *                         event was received
+             * @param itRpnEvent - the actual MIDI RPN event
+             */
+            void ProcessHardcodedRpn(EngineChannel* pEngineChannel,
+                                     Pool<Event>::Iterator& itRpnEvent)
+            {
+                EngineChannelBase<V, R, I>* pChannel =
+                    static_cast<EngineChannelBase<V, R, I>*>(pEngineChannel);
+
+                if (itRpnEvent->Param.RPN.Parameter == 2) { // coarse tuning in half tones
+                    int transpose = (int) itRpnEvent->Param.RPN.ValueMSB() - 64;
+                    // limit to +- two octaves for now
+                    transpose = RTMath::Min(transpose,  24);
+                    transpose = RTMath::Max(transpose, -24);
+                    pChannel->GlobalTranspose = transpose;
+                    // workaround, so we won't have hanging notes
+                    pChannel->ReleaseAllVoices(itRpnEvent);
+                } else if (itRpnEvent->Param.RPN.Parameter == 16383) { // null function RPN
+                    // disable subsequent data entry/increment/decrement processing
+                    pChannel->ResetMidiRpnParameter();
+                }
+            }
+
+            /**
+             * Process MIDI NRPN events with hard coded behavior.
+             *
+             * @param pEngineChannel - engine channel on which the MIDI NRPN
+             *                         event was received
+             * @param itRpnEvent - the actual MIDI NRPN event
+             */
+            void ProcessHardcodedNrpn(EngineChannel* pEngineChannel,
+                                      Pool<Event>::Iterator& itNrpnEvent)
+            {
+                EngineChannelBase<V, R, I>* pChannel =
+                    static_cast<EngineChannelBase<V, R, I>*>(pEngineChannel);
+
+                switch (itNrpnEvent->Param.NRPN.ParameterMSB()) {
+                    case 0x1a: { // volume level of note (Roland GS NRPN)
+                        const uint note = itNrpnEvent->Param.NRPN.ParameterLSB();
+                        const uint vol  = itNrpnEvent->Param.NRPN.ValueMSB();
+                        dmsg(4,("Note Volume NRPN received (note=%d,vol=%d).\n", note, vol));
+                        if (note < 128 && vol < 128)
+                            pChannel->pMIDIKeyInfo[note].Volume = VolumeCurve[vol];
+                        break;
+                    }
+                    case 0x1c: { // panpot of note (Roland GS NRPN)
+                        const uint note = itNrpnEvent->Param.NRPN.ParameterLSB();
+                        const uint pan  = itNrpnEvent->Param.NRPN.ValueMSB();
+                        dmsg(4,("Note Pan NRPN received (note=%d,pan=%d).\n", note, pan));
+                        if (note < 128 && pan < 128) {
+                            pChannel->pMIDIKeyInfo[note].PanLeft  = PanCurve[128 - pan];
+                            pChannel->pMIDIKeyInfo[note].PanRight = PanCurve[pan];
+                        }
+                        break;
+                    }
+                    case 0x1d: { // reverb send of note (Roland GS NRPN)
+                        const uint note = itNrpnEvent->Param.NRPN.ParameterLSB();
+                        const float reverb = float(itNrpnEvent->Param.NRPN.Value) / 16383.f;
+                        dmsg(4,("Note Reverb Send NRPN received (note=%d,send=%f).\n", note, reverb));
+                        if (note < 128)
+                            pChannel->pMIDIKeyInfo[note].ReverbSend = reverb;
+                        break;
+                    }
+                    case 0x1e: { // chorus send of note (Roland GS NRPN)
+                        const uint note = itNrpnEvent->Param.NRPN.ParameterLSB();
+                        const float chorus = float(itNrpnEvent->Param.NRPN.Value) / 16383.f;
+                        dmsg(4,("Note Chorus Send NRPN received (note=%d,send=%f).\n", note, chorus));
+                        if (note < 128)
+                            pChannel->pMIDIKeyInfo[note].ChorusSend = chorus;
+                        break;
+                    }
+                    case 0x7f: {
+                        if (itNrpnEvent->Param.NRPN.ParameterLSB() == 0x7f) { // null function NRPN
+                            // disable subsequent data entry/increment/decrement processing
+                            pChannel->ResetMidiNrpnParameter();
+                        }
                         break;
                     }
                 }
@@ -2028,15 +2463,9 @@ namespace LinuxSampler {
                 NoteBase* pNote = pChannel->pEngine->NoteByID( itEvent->Param.NoteSynthParam.NoteID );
                 if (!pNote || pNote->hostKey < 0 || pNote->hostKey >= 128) return;
 
-                const bool& relative = itEvent->Param.NoteSynthParam.Relative;
-
                 switch (itEvent->Param.NoteSynthParam.Type) {
                     case Event::synth_param_volume:
-                        if (relative)
-                            pNote->Override.Volume *= itEvent->Param.NoteSynthParam.Delta;
-                        else
-                            pNote->Override.Volume = itEvent->Param.NoteSynthParam.Delta;
-                        itEvent->Param.NoteSynthParam.AbsValue = pNote->Override.Volume;
+                        pNote->apply(itEvent, &NoteBase::_Override::Volume);
                         break;
                     case Event::synth_param_volume_time:
                         pNote->Override.VolumeTime = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
@@ -2046,11 +2475,7 @@ namespace LinuxSampler {
                         pNote->Override.VolumeCurve = (fade_curve_t) itEvent->Param.NoteSynthParam.AbsValue;
                         break;
                     case Event::synth_param_pitch:
-                        if (relative)
-                            pNote->Override.Pitch *= itEvent->Param.NoteSynthParam.Delta;
-                        else
-                            pNote->Override.Pitch = itEvent->Param.NoteSynthParam.Delta;
-                        itEvent->Param.NoteSynthParam.AbsValue = pNote->Override.Pitch;
+                        pNote->apply(itEvent, &NoteBase::_Override::Pitch);
                         break;
                     case Event::synth_param_pitch_time:
                         pNote->Override.PitchTime = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
@@ -2060,13 +2485,7 @@ namespace LinuxSampler {
                         pNote->Override.PitchCurve = (fade_curve_t) itEvent->Param.NoteSynthParam.AbsValue;
                         break;
                     case Event::synth_param_pan:
-                        if (relative) {
-                            pNote->Override.Pan = RTMath::RelativeSummedAvg(pNote->Override.Pan, itEvent->Param.NoteSynthParam.Delta, ++pNote->Override.PanSources);
-                        } else {
-                            pNote->Override.Pan = itEvent->Param.NoteSynthParam.Delta;
-                            pNote->Override.PanSources = 1; // only relevant on subsequent change_pan() instrument script calls on same note with 'relative' argument being set
-                        }
-                        itEvent->Param.NoteSynthParam.AbsValue = pNote->Override.Pan;
+                        pNote->apply(itEvent, &NoteBase::_Override::Pan);
                         break;
                     case Event::synth_param_pan_time:
                         pNote->Override.PanTime = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
@@ -2076,54 +2495,54 @@ namespace LinuxSampler {
                         pNote->Override.PanCurve = (fade_curve_t) itEvent->Param.NoteSynthParam.AbsValue;
                         break;
                     case Event::synth_param_cutoff:
-                        pNote->Override.Cutoff = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Cutoff);
                         break;
                     case Event::synth_param_resonance:
-                        pNote->Override.Resonance = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Resonance);
                         break;
                     case Event::synth_param_attack:
-                        pNote->Override.Attack = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Attack);
                         break;
                     case Event::synth_param_decay:
-                        pNote->Override.Decay = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Decay);
                         break;
                     case Event::synth_param_sustain:
-                        pNote->Override.Sustain = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Sustain);
                         break;
                     case Event::synth_param_release:
-                        pNote->Override.Release = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::Release);
                         break;
 
                     case Event::synth_param_cutoff_attack:
-                        pNote->Override.CutoffAttack = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffAttack);
                         break;
                     case Event::synth_param_cutoff_decay:
-                        pNote->Override.CutoffDecay = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffDecay);
                         break;
                     case Event::synth_param_cutoff_sustain:
-                        pNote->Override.CutoffSustain = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffSustain);
                         break;
                     case Event::synth_param_cutoff_release:
-                        pNote->Override.CutoffRelease = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffRelease);
                         break;
 
                     case Event::synth_param_amp_lfo_depth:
-                        pNote->Override.AmpLFODepth = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::AmpLFODepth);
                         break;
                     case Event::synth_param_amp_lfo_freq:
-                        pNote->Override.AmpLFOFreq = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::AmpLFOFreq);
                         break;
                     case Event::synth_param_cutoff_lfo_depth:
-                        pNote->Override.CutoffLFODepth = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffLFODepth);
                         break;
                     case Event::synth_param_cutoff_lfo_freq:
-                        pNote->Override.CutoffLFOFreq = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::CutoffLFOFreq);
                         break;
                     case Event::synth_param_pitch_lfo_depth:
-                        pNote->Override.PitchLFODepth = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::PitchLFODepth);
                         break;
                     case Event::synth_param_pitch_lfo_freq:
-                        pNote->Override.PitchLFOFreq = itEvent->Param.NoteSynthParam.AbsValue = itEvent->Param.NoteSynthParam.Delta;
+                        pNote->apply(itEvent, &NoteBase::_Override::PitchLFOFreq);
                         break;
                 }
 

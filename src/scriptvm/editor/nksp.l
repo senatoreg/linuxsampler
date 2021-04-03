@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2017 Christian Schoenebeck
+ * Copyright (c) 2015-2020 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -31,6 +31,8 @@
 #define YY_USER_ACTION               \
     yyextra->line   = yylineno - 1;  \
     yyextra->column = yycolumn;      \
+    yyextra->offset += (int) yyleng; \
+    yyextra->length =  (int) yyleng; \
     yycolumn += yyleng;
 
 using namespace LinuxSampler;
@@ -67,10 +69,12 @@ static int countNewLineChars(const char* txt) {
 /* inclusive scanner conditions */
 %s PREPROC_BODY_USE
 /* exclusive scanner conditions */
-%x PREPROC_SET_COND PREPROC_RESET_COND PREPROC_IF PREPROC_IF_NOT PREPROC_BODY_EAT PREPROC_PRE_BODY_USE PREPROC_PRE_BODY_EAT PREPROC_EVENT_NAME PREPROC_END_NAME
+%x PREPROC_SET_COND PREPROC_RESET_COND PREPROC_IF PREPROC_IF_NOT PREPROC_BODY_EAT PREPROC_PRE_BODY_USE PREPROC_PRE_BODY_EAT PREPROC_EVENT_NAME PREPROC_END_NAME METRIC UNIT
 
 DIGIT    [0-9]
-ID       [a-zA-Z0-9_]+
+ID       [a-zA-Z][a-zA-Z0-9_]*
+METRIC   (k|h|(da)|d|c|m|u)
+UNIT     (s|(Hz)|B)
 END_ID   on|while|if|select|function|synchronized
 
 %%
@@ -80,16 +84,41 @@ END_ID   on|while|if|select|function|synchronized
     return yyextra->token.baseType;
 }
 
-{DIGIT}+ {
+{DIGIT}+("."{DIGIT}+)? {
     yyextra->token = NumberLiteralToken(yytext);
     return yyextra->token.baseType;
 }
 
- /* there is currently no support for floating point numbers in NKSP yet */
- /*{DIGIT}+"."{DIGIT}* {
+{DIGIT}+("."{DIGIT}+)?/{METRIC}{1,2} {
+    yy_push_state(METRIC, yyscanner);
     yyextra->token = NumberLiteralToken(yytext);
     return yyextra->token.baseType;
- }*/
+}
+
+{DIGIT}+("."{DIGIT}+)?/{UNIT} {
+    yy_push_state(UNIT, yyscanner);
+    yyextra->token = NumberLiteralToken(yytext);
+    return yyextra->token.baseType;
+}
+
+<METRIC>{METRIC}{1,2} {
+    yyextra->token = MetricPrefixToken(yytext);
+    yy_pop_state(yyscanner);
+    return yyextra->token.baseType;
+}
+
+<METRIC>{METRIC}{1,2}/{UNIT} {
+    yyextra->token = MetricPrefixToken(yytext);
+    yy_pop_state(yyscanner);
+    yy_push_state(UNIT, yyscanner);
+    return yyextra->token.baseType;
+}
+
+<UNIT>{UNIT} {
+    yyextra->token = StdUnitToken(yytext);
+    yy_pop_state(yyscanner);
+    return yyextra->token.baseType;
+}
 
 
  /* Preprocessor statement:  SET_CONDITION(name) */
@@ -200,7 +229,7 @@ END_ID   on|while|if|select|function|synchronized
 
  /* Event Handler Names (only if they occur alone in a document!) */
  
-^\s*(init|note|release|controller) {
+^\s*(init|note|release|controller|rpn|nrpn) {
     yyextra->token = EventHandlerNameToken(yytext);
     return yyextra->token.baseType;
 }
@@ -237,7 +266,7 @@ end {
     return yyextra->token.baseType;
 }
 
-declare|while|if|or|and|not|else|case|select|to|mod|const|polyphonic|function|call|synchronized {
+declare|while|if|or|and|not|else|case|select|to|mod|const|polyphonic|function|call|synchronized|patch {
     yyextra->token = KeywordToken(yytext);
     return yyextra->token.baseType;
 }
@@ -250,13 +279,23 @@ declare|while|if|or|and|not|else|case|select|to|mod|const|polyphonic|function|ca
     return yyextra->token.baseType;
 }
 
+"~"{ID} {
+    yyextra->token = RealVariableToken(yytext);
+    return yyextra->token.baseType;
+}
+
 "@"{ID} {
     yyextra->token = StringVariableToken(yytext);
     return yyextra->token.baseType;
 }
 
 "%"{ID} {
-    yyextra->token = ArrayVariableToken(yytext);
+    yyextra->token = IntegerArrayVariableToken(yytext);
+    return yyextra->token.baseType;
+}
+
+"?"{ID} {
+    yyextra->token = RealArrayVariableToken(yytext);
     return yyextra->token.baseType;
 }
 

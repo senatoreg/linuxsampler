@@ -3,7 +3,7 @@
 
 m4_define(linuxsampler_release_major, 2)
 m4_define(linuxsampler_release_minor, 1)
-m4_define(linuxsampler_release_build, 0.svn8)
+m4_define(linuxsampler_release_build, 1.svn71)
 
 
 AC_INIT([linuxsampler],[linuxsampler_release_major.linuxsampler_release_minor.linuxsampler_release_build])
@@ -63,6 +63,12 @@ PKG_PROG_PKG_CONFIG
 # General Checks
 
 AM_CONDITIONAL(CROSS_COMPILING, test $cross_compiling = yes)
+
+# make sure C++14 is supported by compiler
+# (add CXXFLAGS if required [e.g. -std=c++14])
+m4_ifdef([m4_include(m4/ax_cxx_compile_stdcxx.m4)],,
+             [sinclude([m4/ax_cxx_compile_stdcxx.m4])])
+AX_CXX_COMPILE_STDCXX(14, [], mandatory)
 
 AC_MSG_CHECKING([whether x86 architecture])
 def_arch_x86=0
@@ -186,6 +192,102 @@ if test "$config_check_nptl_bug" = "yes"; then
     ])
 else
     echo "NPTL glibc bug check disabled"
+fi
+
+
+# check whether C++ compiler supports "designated initializers"
+echo -n "Checking whether C++ compiler supports designated initializers (partly)... "
+AC_LANG_PUSH([C++])
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
+    #include <stdlib.h>
+    struct Foo {
+        int   a;
+        float b;
+        bool  c;
+        char  d;
+    };
+    static void bar(Foo o) {
+    }
+    int main() {
+        bar({
+          .a = 2,
+          .b = 4.3f,
+          .c = true,
+          .d = 'z'
+        });
+        return 0;
+    }
+    ]])],
+    [cxx_designated_init_partly="yes"],
+    [cxx_designated_init_partly="no"]
+)
+AC_LANG_POP([C++])
+if test $cxx_designated_init_partly = "yes"; then
+    echo "yes"
+else
+    echo "NO"
+    echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+    echo '!                                                             !'
+    echo '! ERROR: Selected C++ compiler does not support designated    !'
+    echo '! initializers at all, not even partly!                       !'
+    echo '!                                                             !'
+    echo '! Please either update your C++ compiler or select a          !'
+    echo '! different compiler (e.g. GCC >= 8 or clang >= 5). If you    !'
+    echo '! have several C++ compilers installed on your machine, you   !'
+    echo '! can easily select a different compiler by environment       !'
+    echo '! variable, e.g. to compile with clang instead:               !'
+    echo '!                                                             !'
+    echo '! CXX=clang++ CC=clang ./configure && make                    !'
+    echo '!                                                             !'
+    echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+    exit -1
+fi
+echo -n "Checking whether C++ compiler fully supports designated initializers... "
+AC_LANG_PUSH([C++])
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
+    #include <stdlib.h>
+    struct Foo {
+        int   a;
+        float b;
+        bool  c;
+        char  d;
+    };
+    static void bar(Foo o) {
+    }
+    int main() {
+        bar({
+          .d = 'z',
+          .a = 2
+        });
+        return 0;
+    }
+    ]])],
+    [cxx_designated_init_fully="yes"],
+    [cxx_designated_init_fully="no"]
+)
+AC_LANG_POP([C++])
+if test $cxx_designated_init_fully = "yes"; then
+    echo "yes"
+else
+    echo 'NO'
+    echo '***************************************************************'
+    echo '*                                                             *'
+    echo '* WARNING: Selected C++ compiler does not fully support       *'
+    echo '* designated initializers (only partly)!                      *'
+    echo '*                                                             *'
+    echo '* You will be able to compile LinuxSampler, but you will not  *'
+    echo '* be able to compile the test cases. Consider updating your   *'
+    echo '* C++ compiler or switching to a different compiler. Chances  *'
+    echo '* are that LinuxSampler will soon no longer support your      *'
+    echo '* compiler.                                                   *'
+    echo '*                                                             *'
+    echo '* If you have several C++ compilers installed on your machine,*'
+    echo '* you can easily select a different compiler by environment   *'
+    echo '* variable, e.g. to compile with clang instead:               *'
+    echo '*                                                             *'
+    echo '* CXX=clang++ CC=clang ./configure && make                    *'
+    echo '*                                                             *'
+    echo '***************************************************************'
 fi
 
 
@@ -604,7 +706,7 @@ fi
 # Checks for various DLL libraries
 
 # Check presence of libgig
-libgig_version="4.1.0"
+libgig_version="4.2.0"
 PKG_CHECK_MODULES(GIG, gig >= $libgig_version, HAVE_GIG=true, HAVE_GIG=false)
 if test "$HAVE_GIG" = "false"; then
     echo "Required libgig version not found!"
@@ -758,16 +860,12 @@ if test "$config_rt_exceptions" = "yes"; then
   AC_DEFINE_UNQUOTED(CONFIG_RT_EXCEPTIONS, 1, [Define to 1 to allow exceptions in the realtime context.])
 fi
 
-config_pthread_testcancel="$mac"
-AC_ARG_ENABLE(pthread-testcancel,
-  [  --enable-pthread-testcancel
-                          Enable pthread_testcancel() calls and avoid
-                          asynchronous cancel of pthreads (default=yes
-                          for Mac targets, no otherwise).],
-  [config_pthread_testcancel="$enableval"],
-  [])
+AC_CHECK_FUNC(pthread_testcancel,
+  [config_pthread_testcancel="yes"],
+  [config_pthread_testcancel="no"]
+)
 if test "$config_pthread_testcancel" = "yes"; then
-  AC_DEFINE_UNQUOTED(CONFIG_PTHREAD_TESTCANCEL, 1, [Define to 1 to enable pthread_testcancel() calls.])
+  AC_DEFINE_UNQUOTED(CONFIG_PTHREAD_TESTCANCEL, 1, [Define to 1 if pthread_testcancel() is available.])
 fi
 
 AC_ARG_ENABLE(preload-samples,

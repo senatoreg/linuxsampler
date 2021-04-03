@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 Christian Schoenebeck
+ * Copyright (c) 2016 - 2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -26,7 +26,7 @@ class ScriptVM;
 class CoreVMDynVar_NKSP_REAL_TIMER : public VMDynIntVar {
 public:
     bool isAssignable() const OVERRIDE { return false; }
-    int evalInt() OVERRIDE;
+    vmint evalInt() OVERRIDE;
 };
 
 /**
@@ -35,7 +35,7 @@ public:
 class CoreVMDynVar_NKSP_PERF_TIMER : public VMDynIntVar {
 public:
     bool isAssignable() const OVERRIDE { return false; }
-    int evalInt() OVERRIDE;
+    vmint evalInt() OVERRIDE;
 };
 
 } // namespace LinuxSampler

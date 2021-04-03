@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 - 2017 Christian Schoenebeck
+ * Copyright (c) 2014 - 2019 Christian Schoenebeck
  *
  * http://www.linuxsampler.org
  *
@@ -19,9 +19,9 @@ namespace LinuxSampler { namespace gig {
     {
     }
 
-    std::map<String,int> InstrumentScriptVM::builtInConstIntVariables() {
+    std::map<String,vmint> InstrumentScriptVM::builtInConstIntVariables() {
         // first get built-in integer variables of derived VM class
-        std::map<String,int> m =
+        std::map<String,vmint> m =
             ::LinuxSampler::InstrumentScriptVM::builtInConstIntVariables();
 
         // add own built-in script constants

@@ -34,6 +34,7 @@ class ConditionTest : public CppUnit::TestFixture {
 
                 ConditionChecker(bool waitFor);
                 int Main();
+                using Thread::SignalStartThread; // make method public
             protected:
                 bool waitFor;
         };
@@ -46,6 +47,7 @@ class ConditionTest : public CppUnit::TestFixture {
 
                 ConditionSetter(Condition* condition, bool toSet);
                 int Main();
+                using Thread::SignalStartThread; // make method public
             private:
                 bool toSet;
         };

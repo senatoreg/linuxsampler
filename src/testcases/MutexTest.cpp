@@ -9,7 +9,9 @@ using namespace std;
 
 // ConcurrentThread
 
-MutexTest::ConcurrentThread::ConcurrentThread() : Thread(false, false, 0, -4) {
+MutexTest::ConcurrentThread::ConcurrentThread() : Thread(false, false, 0, -4),
+    mutex(Mutex::RECURSIVE)
+{
     resource = 0;
 }
 
@@ -17,12 +19,15 @@ int MutexTest::ConcurrentThread::Main() {
     mutex.Lock();
     resource++;
     mutex.Unlock();
+    return 0;
 }
 
 
 // DummyThread
 
-MutexTest::DummyThread::DummyThread() : Thread(false, false, 0, -4) {
+MutexTest::DummyThread::DummyThread() : Thread(false, false, 0, -4),
+    mutex(Mutex::RECURSIVE)
+{
     resource = 0;
 }
 
@@ -31,6 +36,7 @@ int MutexTest::DummyThread::Main() {
     mutex.Lock();
     resource++;
     mutex.Unlock();
+    return 0;
 }
 
 
@@ -86,7 +92,6 @@ void MutexTest::testDoubleLock() {
 
 // Check if the previous tests namely 'testLock()' and 'testUnlock()' still work with double locking previously
 void MutexTest::testDoubleLockStillBlocksConcurrentThread() {
-  bool success = false;
   // check if testDoubleLock() succeeds, otherwise this test doesnt make sense anyway
   doubleLockSucceeded = false;
   testDoubleLock();
@@ -96,13 +101,20 @@ void MutexTest::testDoubleLockStillBlocksConcurrentThread() {
       t.mutex.Lock();
       t.SignalStartThread();
       usleep(400000); // wait 400ms
-      success = (t.resource == 0);
-      t.mutex.Unlock();
-
+      bool success = (t.resource == 0);
+      CPPUNIT_ASSERT(success);
       if (success) {
+          t.mutex.Unlock();
           usleep(200000); // wait 200ms
-          success = (t.resource == 1);
+          success = (t.resource == 0); // thread should should still be blocked, since recursive mutex
+          CPPUNIT_ASSERT(success);
       }
+      if (success) {
+          t.mutex.Unlock();
+          usleep(200000); // wait 200ms
+          CPPUNIT_ASSERT(t.resource == 1); // unlock count matches previous lock count, so thread should have run through now
+      }
+  } else {
+      CPPUNIT_ASSERT(false);
   }
-  CPPUNIT_ASSERT(success);
 }

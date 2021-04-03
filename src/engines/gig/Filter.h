@@ -609,21 +609,23 @@ namespace gig {
             }
 
             enum vcf_type_t {
+                // GigaStudio original filter types
                 vcf_type_gig_lowpass = ::gig::vcf_type_lowpass,
                 vcf_type_gig_lowpassturbo = ::gig::vcf_type_lowpassturbo,
                 vcf_type_gig_bandpass = ::gig::vcf_type_bandpass,
                 vcf_type_gig_highpass = ::gig::vcf_type_highpass,
                 vcf_type_gig_bandreject = ::gig::vcf_type_bandreject,
-                vcf_type_1p_lowpass,
-                vcf_type_1p_highpass,
-                vcf_type_2p_lowpass,
-                vcf_type_2p_highpass,
-                vcf_type_2p_bandpass,
-                vcf_type_2p_bandreject,
-                vcf_type_4p_lowpass,
-                vcf_type_4p_highpass,
-                vcf_type_6p_lowpass,
-                vcf_type_6p_highpass
+                // own filter types
+                vcf_type_1p_lowpass = ::gig::vcf_type_lowpass_1p,
+                vcf_type_1p_highpass = ::gig::vcf_type_highpass_1p,
+                vcf_type_2p_lowpass = ::gig::vcf_type_lowpass_2p,
+                vcf_type_2p_highpass = ::gig::vcf_type_highpass_2p,
+                vcf_type_2p_bandpass = ::gig::vcf_type_bandpass_2p,
+                vcf_type_2p_bandreject = ::gig::vcf_type_bandreject_2p,
+                vcf_type_4p_lowpass = ::gig::vcf_type_lowpass_4p,
+                vcf_type_4p_highpass = ::gig::vcf_type_highpass_4p,
+                vcf_type_6p_lowpass = ::gig::vcf_type_lowpass_6p,
+                vcf_type_6p_highpass = ::gig::vcf_type_highpass_6p,
             };
 
             void SetType(vcf_type_t FilterType) {
